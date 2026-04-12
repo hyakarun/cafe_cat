@@ -4,8 +4,14 @@
 import { pipeline, env } from '@xenova/transformers';
 
 // WebGPU configuration
-env.allowLocalModels = false; // Set to true if models are served locally
+env.allowLocalModels = false;
 env.useBrowserCache = true;
+
+// 実行環境の安定化設定
+// @ts-ignore
+env.backends.onnx.wasm.proxy = false; 
+// @ts-ignore
+env.backends.onnx.wasm.numThreads = 1;
 
 export class ShirettoPipeline {
   private segmenter: any = null;
