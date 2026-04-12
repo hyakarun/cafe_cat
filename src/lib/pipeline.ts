@@ -3,16 +3,6 @@
  */
 import { pipeline, env } from '@xenova/transformers';
 
-// WebGPU configuration
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-// 実行環境の安定化設定
-// @ts-ignore
-env.backends.onnx.wasm.proxy = false; 
-// @ts-ignore
-env.backends.onnx.wasm.numThreads = 1;
-
 export class ShirettoPipeline {
   private segmenter: any = null;
   private isInitializing: boolean = false;
@@ -21,6 +11,14 @@ export class ShirettoPipeline {
     if (this.segmenter || this.isInitializing) return;
     this.isInitializing = true;
     
+    // 実行環境の安定化設定（init内で実行）
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+    // @ts-ignore
+    env.backends.onnx.wasm.proxy = false; 
+    // @ts-ignore
+    env.backends.onnx.wasm.numThreads = 1;
+
     // WebGPUのサポート確認
     // @ts-ignore
     const isWebGPUSupported = !!navigator.gpu;
