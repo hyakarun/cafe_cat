@@ -13,6 +13,14 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@xenova/transformers', 'onnxruntime-web'],
   },
+  resolve: {
+    alias: {
+      'onnxruntime-web': 'onnxruntime-web/dist/ort-web.min.js',
+    },
+  },
+  define: {
+    'global': 'window',
+  },
   build: {
     target: 'esnext',
   },
