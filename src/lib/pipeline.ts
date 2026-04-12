@@ -21,15 +21,29 @@ export class ShirettoPipeline {
     if (this.segmenter || this.isInitializing) return;
     this.isInitializing = true;
     
+    // WebGPUのサポート確認
+    // @ts-ignore
+    const isWebGPUSupported = !!navigator.gpu;
+    console.log('WebGPU Support:', isWebGPUSupported);
+
     try {
+      // 最初から安全なフォールバックを考慮して初期化
+      const device = isWebGPUSupported ? 'webgpu' : 'wasm';
+      
       // @ts-ignore
       this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
-        device: 'webgpu',
+        device: device,
       });
-      console.log('AI Pipeline initialized with WebGPU');
+      console.log(`AI Pipeline initialized with ${device}`);
     } catch (error) {
-      console.warn('WebGPU failed, falling back to CPU/WASM:', error);
-      this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified');
+      console.warn('Primary initialization failed, trying WASM fallback:', error);
+      try {
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
+          device: 'wasm',
+        });
+      } catch (wasmError) {
+        console.error('All backends failed:', wasmError);
+      }
     } finally {
       this.isInitializing = false;
     }
