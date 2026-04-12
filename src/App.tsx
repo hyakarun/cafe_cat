@@ -7,6 +7,7 @@ const App: React.FC = () => {
   const [image, setImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
   
   const handleCapture = () => {
     const input = document.createElement('input');
@@ -29,9 +30,11 @@ const App: React.FC = () => {
 
   const processImage = async (img: string) => {
     setIsProcessing(true);
+    setDebugInfo(null);
     try {
-      const result = await pipelineInstance.process(img);
+      const { result, debugInfo } = await pipelineInstance.process(img);
       setProcessedImage(result);
+      setDebugInfo(debugInfo);
     } catch (error) {
       console.error('Processing failed:', error);
       setProcessedImage(img);
@@ -170,6 +173,31 @@ const App: React.FC = () => {
                   シェアする
                 </button>
               </div>
+
+              {debugInfo && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="p-4 rounded-2xl bg-white/5 border border-white/10 text-xs font-mono"
+                >
+                  <div className="text-white/40 mb-2 uppercase tracking-widest text-[10px]">Debug Information</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-white/60 mb-1">Detected Objects:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {debugInfo.labels.map((l: string, i: number) => (
+                          <span key={i} className="px-1.5 py-0.5 rounded bg-white/10 text-white/80">{l}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-white/60 mb-1">Placement:</p>
+                      <p className="text-blue-400">{debugInfo.placement.reason}</p>
+                      <p className="text-white/30 text-[9px]">X: {debugInfo.placement.x.toFixed(2)}, Y: {debugInfo.placement.y.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

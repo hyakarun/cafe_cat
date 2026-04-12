@@ -16,10 +16,9 @@ export class ShirettoPipeline {
     this.isInitializing = true;
     
     try {
-      // Use a lightweight segmentation model
-      // Note: 'Xenova/slimsam-0.125-unified' is very small and fast
+      // @ts-ignore
       this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
-        device: 'webgpu', // Use WebGPU for inference
+        device: 'webgpu',
       });
       console.log('AI Pipeline initialized with WebGPU');
     } catch (error) {
@@ -30,48 +29,78 @@ export class ShirettoPipeline {
     }
   }
 
-  async process(imageSource: string): Promise<string> {
+  async process(imageSource: string): Promise<{ result: string, debugInfo: any }> {
     if (!this.segmenter) await this.init();
 
     // 1. Perform Segmentation
     const output = await this.segmenter(imageSource);
-    console.log('Segmentation Output:', output);
+    console.log('AI Segmentation Raw Output:', output);
 
-    // 2. Analyize Masks
-    // Expected labels: 'cup', 'table', 'plate', 'bottle', etc.
-    const masks = this.parseMasks(output);
+    // 2. Analyze Masks (Step A)
+    const analysis = this.analyzeSegments(output);
     
-    // 3. Determine Placement
-    const placement = this.calculatePlacement(masks);
+    // 3. Determine Placement (Step B & C)
+    const placement = this.calculatePlacement(analysis);
 
-    // 4. Synthesize (Mock implementation for now)
-    return await this.drawCat(imageSource, placement);
-  }
-
-  private parseMasks(output: any[]) {
+    // 4. Synthesize
+    const result = await this.drawCat(imageSource, placement, analysis);
+    
     return {
-      container: output.find(s => ['cup', 'bowl', 'bottle', 'plate'].includes(s.label)),
-      table: output.find(s => ['table', 'desk', 'surface'].includes(s.label)),
-      // In a real implementation, we would extract 'liquid' for negative masks
+      result,
+      debugInfo: {
+        labels: output.map(s => s.label),
+        placement,
+        analysis
+      }
     };
   }
 
-  private calculatePlacement(masks: any) {
-    if (!masks.container) return { x: 0.8, y: 0.8, scale: 0.2 }; // Default bottom-right
+  private analyzeSegments(output: any[]) {
+    // 容器、テーブル、中身などの領域を整理
+    const container = output.find((s: any) => ['cup', 'bowl', 'bottle', 'plate', 'mug'].includes(s.label));
+    const table = output.find((s: any) => ['table', 'desk', 'surface', 'cloth'].includes(s.label));
+    const contents = output.find((s: any) => ['liquid', 'food', 'coffee', 'tea'].includes(s.label));
 
-    // Logic for "Side of container on table"
-    // We would use the mask pixels to find the lowest points of the container
+    // 簡単な幾何学情報の抽出 (実際のピクセルデータから計算する代わりにモック情報を補強)
+    // 実際には各segmentの mask プロパティを走査して計算する
     return {
-      x: 0.7, 
-      y: 0.75,
-      scale: 0.15,
-      rotation: 5
+      container: container ? { ...container, bounds: this.estimateBounds(container) } : null,
+      table: table ? { ...table, bounds: this.estimateBounds(table) } : null,
+      contents: contents ? { ...contents, bounds: this.estimateBounds(contents) } : null,
     };
   }
 
-  private async drawCat(source: string, placement: any): Promise<string> {
+  private estimateBounds(segment: any) {
+    // モック: 実際には segment.mask (ImageData) から最小/最大座標を算出する
+    return {
+      minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 // 割合
+    };
+  }
+
+  private calculatePlacement(analysis: any) {
+    const { container, table } = analysis;
+
+    if (!container) {
+      return { x: 0.8, y: 0.8, scale: 0.15, rotation: 0, reason: 'No container found' };
+    }
+
+    // 基本戦略: 容器の下端（maxY）かつ左右どちらかの端に近いテーブル接地ポイント
+    const x = container.bounds.maxX + 0.05; // 容器の右側
+    const y = container.bounds.maxY - 0.05; // 容器の下の方（接地付近）
+
+    return {
+      x: Math.min(0.9, x),
+      y: Math.min(0.9, y),
+      scale: 0.12,
+      rotation: -5,
+      reason: 'Side of container found'
+    };
+  }
+
+  private async drawCat(source: string, placement: any, analysis: any): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
         const canvas = document.createElement('canvas');
         canvas.width = img.width;
@@ -79,40 +108,52 @@ export class ShirettoPipeline {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(source);
 
-        // Draw original
         ctx.drawImage(img, 0, 0);
 
-        // Draw Minimalist Cat (as a series of lines or a pre-defined path)
+        // デバッグ用: 認識されたバウンディングボックスの描画
+        if (analysis.container) {
+          ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+          ctx.strokeRect(
+            analysis.container.bounds.minX * img.width,
+            analysis.container.bounds.minY * img.height,
+            (analysis.container.bounds.maxX - analysis.container.bounds.minX) * img.width,
+            (analysis.container.bounds.maxY - analysis.container.bounds.minY) * img.height
+          );
+        }
+
         const catSize = img.width * placement.scale;
         const x = img.width * placement.x;
         const y = img.height * placement.y;
 
+        // 猫の描画 (ミニマルな線画)
         ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = Math.max(2, img.width / 400);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
 
-        // Draw a simple "Shiretto" cat head peeking
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(placement.rotation * Math.PI / 180);
         
         ctx.beginPath();
-        // Ears & Head
-        ctx.moveTo(-catSize/2, 0);
-        ctx.lineTo(-catSize/2.2, -catSize/1.5); // Left ear
-        ctx.lineTo(-catSize/4, -catSize/2);
-        ctx.lineTo(catSize/4, -catSize/2);
-        ctx.lineTo(catSize/2.2, -catSize/1.5); // Right ear
-        ctx.lineTo(catSize/2, 0);
+        // 首から上を覗かせるようなポーズ
+        ctx.moveTo(-catSize/2, catSize/2);
+        ctx.quadraticCurveTo(-catSize/2.2, -catSize/2, -catSize/2.5, -catSize/1.2); // 左耳
+        ctx.lineTo(-catSize/5, -catSize/1.8);
+        ctx.lineTo(catSize/5, -catSize/1.8);
+        ctx.lineTo(catSize/2.5, -catSize/1.2); // 右耳
+        ctx.quadraticCurveTo(catSize/2.2, -catSize/2, catSize/2, catSize/2);
         ctx.stroke();
 
-        // Eyes (two dots)
-        ctx.fillStyle = 'white';
+        // 閉じた目 (しれっとした表情)
         ctx.beginPath();
-        ctx.arc(-catSize/6, -catSize/4, 2, 0, Math.PI * 2);
-        ctx.arc(catSize/6, -catSize/4, 2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(-catSize/4, -catSize/4);
+        ctx.lineTo(-catSize/8, -catSize/4);
+        ctx.moveTo(catSize/4, -catSize/4);
+        ctx.lineTo(catSize/8, -catSize/4);
+        ctx.stroke();
 
         ctx.restore();
 
