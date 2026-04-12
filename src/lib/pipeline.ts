@@ -1,7 +1,6 @@
 /**
  * Shiretto Cat: Edge AI Pipeline Logic
  */
-import { pipeline, env } from '@xenova/transformers';
 
 export class ShirettoPipeline {
   private segmenter: any = null;
@@ -11,37 +10,33 @@ export class ShirettoPipeline {
     if (this.segmenter || this.isInitializing) return;
     this.isInitializing = true;
     
-    // 実行環境の安定化設定（init内で実行）
-    env.allowLocalModels = false;
-    env.useBrowserCache = true;
-    // @ts-ignore
-    env.backends.onnx.wasm.proxy = false; 
-    // @ts-ignore
-    env.backends.onnx.wasm.numThreads = 1;
-
-    // WebGPUのサポート確認
-    // @ts-ignore
-    const isWebGPUSupported = !!navigator.gpu;
-    console.log('WebGPU Support:', isWebGPUSupported);
-
     try {
+      // 動的インポートによりViteのプレハンドリングを回避
+      // @ts-ignore
+      const { pipeline, env } = await import('@xenova/transformers');
+
+      // 実行環境の安定化設定
+      env.allowLocalModels = false;
+      env.useBrowserCache = true;
+      // @ts-ignore
+      env.backends.onnx.wasm.proxy = false; 
+      // @ts-ignore
+      env.backends.onnx.wasm.numThreads = 1;
+
+      // WebGPUのサポート確認
+      // @ts-ignore
+      const isWebGPUSupported = !!navigator.gpu;
+      console.log('WebGPU Support:', isWebGPUSupported);
+
       // 最初から安全なフォールバックを考慮して初期化
       const device = isWebGPUSupported ? 'webgpu' : 'wasm';
       
-      // @ts-ignore
       this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
         device: device,
       });
       console.log(`AI Pipeline initialized with ${device}`);
     } catch (error) {
-      console.warn('Primary initialization failed, trying WASM fallback:', error);
-      try {
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
-          device: 'wasm',
-        });
-      } catch (wasmError) {
-        console.error('All backends failed:', wasmError);
-      }
+      console.warn('Initialization failed:', error);
     } finally {
       this.isInitializing = false;
     }
