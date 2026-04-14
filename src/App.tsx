@@ -99,8 +99,7 @@ const App: React.FC = () => {
             >
               <div className="listing-card">
                 <div className="listing-image-wrapper">
-                  <img src={image} alt="Target" className="listing-image" />
-                  
+                  <img src={processedImage || image} alt="Target" className="listing-image" />
                   {isProcessing && (
                     <div className="processing-scrim">
                       <motion.div 
