@@ -10,12 +10,6 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
-  optimizeDeps: {
-    exclude: ['@xenova/transformers', 'onnxruntime-web'],
-  },
-  define: {
-    'global': 'globalThis',
-  },
   build: {
     target: 'esnext',
   },
