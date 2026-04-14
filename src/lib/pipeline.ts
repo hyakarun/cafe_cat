@@ -25,12 +25,12 @@ export class ShirettoPipeline {
 
       try {
         const device = isWebGPUSupported ? 'webgpu' : 'wasm';
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { device });
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { device });
         console.log(`AI Pipeline initialized with ${device}`);
       } catch (err) {
         console.warn('Failed with primary device, falling back to wasm...', err);
         // Fallback specifically to WASM if WebGPU acts up
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { device: 'wasm' });
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { device: 'wasm' });
         console.log(`AI Pipeline initialized with wasm via fallback`);
       }
     } catch (error) {
