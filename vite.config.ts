@@ -13,9 +13,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@xenova/transformers'],
   },
-  define: {
-    'global': 'window',
-  },
   build: {
     target: 'esnext',
   },

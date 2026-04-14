@@ -1,6 +1,7 @@
 /**
  * Shiretto Cat: Edge AI Pipeline Logic
  */
+import { pipeline, env } from '@xenova/transformers';
 
 export class ShirettoPipeline {
   private segmenter: any = null;
@@ -11,8 +12,6 @@ export class ShirettoPipeline {
     this.isInitializing = true;
     
     try {
-      const { pipeline, env } = await import('@xenova/transformers');
-
       env.allowLocalModels = false;
       env.useBrowserCache = true;
       // @ts-ignore
