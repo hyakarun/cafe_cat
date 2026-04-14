@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, Upload, Share2, Sparkles, Cat, Info, ChevronRight } from 'lucide-react';
+import { Camera, Upload, Share2, Sparkles, Cat, Info, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { pipelineInstance } from './lib/pipeline';
 import './index.css';
@@ -51,14 +51,14 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="app-container">
-      <header className="nav-glass">
-        <div className="nav-logo">
-          <Cat size={18} />
+    <div className="airbnb-container">
+      <header className="nav-bar">
+        <div className="nav-brand">
+          <Cat size={24} />
           <span>Shiretto Cat</span>
         </div>
-        <button className="nav-icon">
-          <Info size={18} />
+        <button className="nav-circular-btn">
+          <Info size={20} />
         </button>
       </header>
 
@@ -67,23 +67,24 @@ const App: React.FC = () => {
           {!image ? (
             <motion.section
               key="landing"
-              className="section-dark"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              className="hero-section"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
             >
-              <h1 className="hero-headline">日常に、<br/>しれっと猫を。</h1>
-              <p className="hero-subheadline">
+              <h1 className="headline">日常に、<br/>しれっと猫を。</h1>
+              <p className="subheadline">
                 AIがあなたのカフェ写真に、ミニマルな猫をこっそり忍び込ませます。
               </p>
 
-              <div className="buttons-row mt-6">
-                <button onClick={handleCapture} className="btn-primary">
-                  <Camera size={18} />
+              <div className="buttons-group">
+                <button onClick={handleCapture} className="btn-primary-red">
+                  <Camera size={20} />
                   写真を撮る
                 </button>
-                <button onClick={handleCapture} className="btn-secondary-link">
-                  <Upload size={18} />
+                <button onClick={handleCapture} className="btn-secondary">
+                  <Upload size={20} />
                   ライブラリから選択
                 </button>
               </div>
@@ -91,64 +92,70 @@ const App: React.FC = () => {
           ) : (
             <motion.section
               key="preview"
-              className="section-light"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.4 }}
+              style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
             >
-              <div className="card-container">
-                <img src={image} alt="Target" className="preview-image" />
-                
-                {isProcessing && (
-                  <div className="processing-overlay">
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
-                      <Sparkles size={32} />
-                    </motion.div>
-                    <p className="processing-text">猫を忍び込ませ中...</p>
-                    <div className="progress-bar-container">
+              <div className="listing-card">
+                <div className="listing-image-wrapper">
+                  <img src={image} alt="Target" className="listing-image" />
+                  
+                  {isProcessing && (
+                    <div className="processing-scrim">
                       <motion.div 
-                        className="progress-bar"
-                        initial={{ width: 0 }}
-                        animate={{ width: "100%" }}
-                        transition={{ duration: 2 }}
-                      />
+                        animate={{ rotate: 360 }} 
+                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        className="processing-spinner"
+                      >
+                        <Sparkles size={40} />
+                      </motion.div>
+                      <div style={{ fontWeight: 600, fontSize: '16px' }}>
+                        猫を忍び込ませ中...
+                      </div>
                     </div>
+                  )}
+
+                  {processedImage && !isProcessing && (
+                    <motion.div 
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ type: "spring", bounce: 0.5 }}
+                      className="processed-element"
+                    >
+                      <Cat size={40} color="var(--brand-red)" />
+                    </motion.div>
+                  )}
+                </div>
+
+                <div className="card-content">
+                  <h2 className="card-title">カフェの思い出</h2>
+                  <p className="card-desc">しれっと忍び込んだ猫と一緒に。</p>
+                  
+                  <div className="actions-row">
+                    <button onClick={reset} className="btn-circle" title="やり直す">
+                      <RotateCcw size={20} />
+                    </button>
+                    <button className="btn-primary-red" style={{ flex: 1, justifyContent: 'center' }}>
+                      <Share2 size={20} />
+                      シェアする
+                    </button>
                   </div>
-                )}
-
-                {processedImage && !isProcessing && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="processed-icon-overlay"
-                  >
-                    <Cat size={64} color="#ffffff" />
-                  </motion.div>
-                )}
-              </div>
-
-              <div className="buttons-row mt-6">
-                <button onClick={reset} className="btn-link">
-                  やり直す <ChevronRight size={16} />
-                </button>
-                <button className="btn-primary">
-                  <Share2 size={18} />
-                  シェアする
-                </button>
+                </div>
               </div>
 
               {debugInfo && (
-                <div className="debug-container">
-                  <div style={{ color: 'rgba(255,255,255,0.48)', marginBottom: '8px', textTransform: 'uppercase' }}>Debug Information</div>
+                <div className="debug-panel">
+                  <div style={{ fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>Debug Information</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ color: 'rgba(255,255,255,0.8)' }}>Objects:</div>
+                      <div style={{ color: 'var(--text-primary)' }}>Objects:</div>
                       <div>{debugInfo.labels.join(', ')}</div>
                     </div>
                     <div>
-                      <div style={{ color: 'var(--apple-blue)' }}>Placement: {debugInfo.placement.reason}</div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.48)' }}>
-                        X: {debugInfo.placement.x.toFixed(2)}, Y: {debugInfo.placement.y.toFixed(2)}
-                      </div>
+                      <div style={{ color: 'var(--text-primary)' }}>Placement:</div>
+                      <div>{debugInfo.placement.reason}</div>
+                      <div style={{ fontSize: '10px' }}>X: {debugInfo.placement.x.toFixed(2)}, Y: {debugInfo.placement.y.toFixed(2)}</div>
                     </div>
                   </div>
                 </div>
