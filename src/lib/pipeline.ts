@@ -11,32 +11,32 @@ export class ShirettoPipeline {
     this.isInitializing = true;
     
     try {
-      // 動的インポートによりViteのプレハンドリングを回避
-      // @ts-ignore
       const { pipeline, env } = await import('@xenova/transformers');
 
-      // 実行環境の安定化設定
       env.allowLocalModels = false;
       env.useBrowserCache = true;
       // @ts-ignore
-      env.backends.onnx.wasm.proxy = false; 
-      // @ts-ignore
-      env.backends.onnx.wasm.numThreads = 1;
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        env.backends.onnx.wasm.proxy = false; 
+        env.backends.onnx.wasm.numThreads = 1;
+      }
 
-      // WebGPUのサポート確認
-      // @ts-ignore
       const isWebGPUSupported = !!navigator.gpu;
       console.log('WebGPU Support:', isWebGPUSupported);
 
-      // 最初から安全なフォールバックを考慮して初期化
-      const device = isWebGPUSupported ? 'webgpu' : 'wasm';
-      
-      this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
-        device: device,
-      });
-      console.log(`AI Pipeline initialized with ${device}`);
+      try {
+        const device = isWebGPUSupported ? 'webgpu' : 'wasm';
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { device });
+        console.log(`AI Pipeline initialized with ${device}`);
+      } catch (err) {
+        console.warn('Failed with primary device, falling back to wasm...', err);
+        // Fallback specifically to WASM if WebGPU acts up
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { device: 'wasm' });
+        console.log(`AI Pipeline initialized with wasm via fallback`);
+      }
     } catch (error) {
-      console.warn('Initialization failed:', error);
+      console.error('Initialization completely failed:', error);
+      throw error;
     } finally {
       this.isInitializing = false;
     }
@@ -44,6 +44,7 @@ export class ShirettoPipeline {
 
   async process(imageSource: string): Promise<{ result: string, debugInfo: any }> {
     if (!this.segmenter) await this.init();
+    if (!this.segmenter) throw new Error("AI segmenter failed to initialize properly.");
 
     // 1. Perform Segmentation
     const output = await this.segmenter(imageSource);
