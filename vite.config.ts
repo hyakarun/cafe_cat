@@ -11,7 +11,10 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['@xenova/transformers'],
+    exclude: ['@xenova/transformers', 'onnxruntime-web'],
+  },
+  define: {
+    'global': 'globalThis',
   },
   build: {
     target: 'esnext',
