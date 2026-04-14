@@ -70,43 +70,97 @@ export class ShirettoPipeline {
 
   private analyzeSegments(output: any[]) {
     // 容器、テーブル、中身などの領域を整理
-    const container = output.find((s: any) => ['cup', 'bowl', 'bottle', 'plate', 'mug'].includes(s.label));
-    const table = output.find((s: any) => ['table', 'desk', 'surface', 'cloth'].includes(s.label));
-    const contents = output.find((s: any) => ['liquid', 'food', 'coffee', 'tea'].includes(s.label));
+    const container = output.find((s: any) => {
+      const l = s.label.toLowerCase();
+      return ['cup', 'bowl', 'bottle', 'plate', 'mug', 'coffee', 'glass'].some(kw => l.includes(kw));
+    });
+    const table = output.find((s: any) => ['table', 'desk', 'surface', 'cloth'].some(kw => s.label.toLowerCase().includes(kw)));
+    
+    // 見つからなかった場合は、面積がマズマズ大きいオブジェクトをフォールバックにする（一旦1つ目の結果）
+    const targetObj = container || (output.length > 0 ? output[0] : null);
 
-    // 簡単な幾何学情報の抽出 (実際のピクセルデータから計算する代わりにモック情報を補強)
-    // 実際には各segmentの mask プロパティを走査して計算する
     return {
-      container: container ? { ...container, bounds: this.estimateBounds(container) } : null,
+      container: targetObj ? { ...targetObj, bounds: this.estimateBounds(targetObj) } : null,
       table: table ? { ...table, bounds: this.estimateBounds(table) } : null,
-      contents: contents ? { ...contents, bounds: this.estimateBounds(contents) } : null,
     };
   }
 
   private estimateBounds(segment: any) {
-    // モック: 実際には segment.mask (ImageData) から最小/最大座標を算出する
-    return {
-      minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 // 割合
-    };
+    if (!segment || !segment.mask) {
+      return { minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 };
+    }
+    
+    try {
+      const mask = segment.mask;
+      const width = mask.width;
+      const height = mask.height;
+      const data = mask.data;
+      
+      if (!width || !height || !data || data.length === 0) {
+        return { minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 };
+      }
+
+      let minX = width, maxX = 0, minY = height, maxY = 0;
+      let found = false;
+      const channels = mask.channels || (data.length / (width * height));
+      
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * channels;
+          // RGBAならアルファ値(idx+3)、グレースケールならそのまま(idx)を使用
+          const val = channels === 4 ? data[idx + 3] : data[idx];
+          
+          if (val > 128 || (channels === 1 && val > 0)) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            found = true;
+          }
+        }
+      }
+      
+      if (!found) {
+        return { minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 };
+      }
+      
+      return { 
+        minX: minX / width, 
+        maxX: maxX / width, 
+        minY: minY / height, 
+        maxY: maxY / height 
+      };
+    } catch (err) {
+      console.warn("Bounds estimation failed:", err);
+      return { minX: 0.3, maxX: 0.7, minY: 0.4, maxY: 0.8 };
+    }
   }
 
   private calculatePlacement(analysis: any) {
-    const { container, table } = analysis;
+    const { container } = analysis;
 
     if (!container) {
-      return { x: 0.8, y: 0.8, scale: 0.15, rotation: 0, reason: 'No container found' };
+      return { x: 0.8, y: 0.8, scale: 0.15, rotation: 10, reason: 'No object found' };
     }
 
-    // 基本戦略: 容器の下端（maxY）かつ左右どちらかの端に近いテーブル接地ポイント
-    const x = container.bounds.maxX + 0.05; // 容器の右側
-    const y = container.bounds.maxY - 0.05; // 容器の下の方（接地付近）
-
+    const b = container.bounds;
+    const boxWidth = b.maxX - b.minX;
+    const boxHeight = b.maxY - b.minY;
+    
+    // 容器の右側、かつ下から30%くらい上（テーブルとの接地感）に配置
+    const x = b.maxX; 
+    const y = b.maxY - (boxHeight * 0.3);
+    
+    // スケールは被写体のサイズに比例させる
+    const scale = Math.max(0.1, Math.min(0.2, boxWidth * 0.6));
+    
     return {
-      x: Math.min(0.9, x),
-      y: Math.min(0.9, y),
-      scale: 0.12,
-      rotation: -5,
-      reason: 'Side of container found'
+      // 画面外にはみ出ないように 10% ～ 90% の間に収める
+      x: Math.min(0.9, Math.max(0.1, x)),
+      y: Math.min(0.9, Math.max(0.1, y)),
+      scale: scale,
+      rotation: 15, // しれっと顔を出す傾き
+      reason: `Peeking from ${container.label}'s right edge`
     };
   }
 
