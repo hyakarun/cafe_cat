@@ -164,7 +164,49 @@ export class ShirettoPipeline {
     };
   }
 
+  private async loadAndProcessCatAsset(): Promise<HTMLCanvasElement> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = '/cat_asset.png';
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return resolve(c);
+        
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, c.width, c.height);
+        const data = imgData.data;
+        
+        // #00FF00 (ネオングリーン) をクロマキー処理で透過
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          
+          if (g > 200 && r < 50 && b < 50) {
+            data[i + 3] = 0; // 完全に透過
+          } else if (g > 150 && r < 100 && b < 100) {
+            // エッジのアンチエイリアス処理
+            data[i + 3] = Math.max(0, data[i + 3] - (g - 150));
+          }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve(c);
+      };
+      img.onerror = () => {
+        console.warn("Cat asset not found or failed to load");
+        const c = document.createElement('canvas'); // 空のキャンバス
+        resolve(c);
+      };
+    });
+  }
+
   private async drawCat(source: string, placement: any, analysis: any): Promise<string> {
+    // まずAI生成の猫アセットをロード＆透過処理
+    const catCanvas = await this.loadAndProcessCatAsset();
+
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -175,55 +217,34 @@ export class ShirettoPipeline {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(source);
 
+        // 1. 元の写真をベースとして描画
         ctx.drawImage(img, 0, 0);
 
-        // デバッグ用: 認識されたバウンディングボックスの描画
-        if (analysis.container) {
-          ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
-          ctx.strokeRect(
-            analysis.container.bounds.minX * img.width,
-            analysis.container.bounds.minY * img.height,
-            (analysis.container.bounds.maxX - analysis.container.bounds.minX) * img.width,
-            (analysis.container.bounds.maxY - analysis.container.bounds.minY) * img.height
-          );
-        }
-
-        const catSize = img.width * placement.scale;
+        // 2. 猫のサイズと位置を計算
+        // 画像は手描き線より大きいので、スケールを少し強めに乗算します
+        const catSize = img.width * placement.scale * 1.8;
         const x = img.width * placement.x;
         const y = img.height * placement.y;
 
-        // 猫の描画 (ミニマルな線画)
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = Math.max(2, img.width / 400);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.shadowBlur = 4;
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-
         ctx.save();
         ctx.translate(x, y);
+        // しれっと覗くような少しの傾き
         ctx.rotate(placement.rotation * Math.PI / 180);
-        
-        ctx.beginPath();
-        // 首から上を覗かせるようなポーズ
-        ctx.moveTo(-catSize/2, catSize/2);
-        ctx.quadraticCurveTo(-catSize/2.2, -catSize/2, -catSize/2.5, -catSize/1.2); // 左耳
-        ctx.lineTo(-catSize/5, -catSize/1.8);
-        ctx.lineTo(catSize/5, -catSize/1.8);
-        ctx.lineTo(catSize/2.5, -catSize/1.2); // 右耳
-        ctx.quadraticCurveTo(catSize/2.2, -catSize/2, catSize/2, catSize/2);
-        ctx.stroke();
 
-        // 閉じた目 (しれっとした表情)
-        ctx.beginPath();
-        ctx.moveTo(-catSize/4, -catSize/4);
-        ctx.lineTo(-catSize/8, -catSize/4);
-        ctx.moveTo(catSize/4, -catSize/4);
-        ctx.lineTo(catSize/8, -catSize/4);
-        ctx.stroke();
+        // 自然に見せるためのドロップシャドウ
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = 'rgba(0,0,0,0.4)';
+        ctx.shadowOffsetY = 5;
+
+        if (catCanvas.width > 0) {
+          // 元画像の縦横比を維持しながら描画
+          const aspect = catCanvas.height / catCanvas.width;
+          const h = catSize * aspect;
+          // (x, y) が猫の中心(足元ではなく胴の中心)になるようにオフセット
+          ctx.drawImage(catCanvas, -catSize / 2, -h * 0.4, catSize, h);
+        }
 
         ctx.restore();
-
         resolve(canvas.toDataURL('image/jpeg', 0.9));
       };
       img.src = source;
