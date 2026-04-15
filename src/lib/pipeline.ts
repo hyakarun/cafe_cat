@@ -63,30 +63,46 @@ export class ShirettoPipeline {
   }
 
   private analyzeSegments(output: any[]) {
+    // カフェに関連するオブジェクトの検索範囲を大幅に拡張
     const CAFE_TARGETS = [
-      'cup', 'mug', 'glass', 'bottle', 'beverage', 'drink',
-      'plate', 'bowl', 'dish', 'spoon', 'fork', 'knife',
-      'food', 'cake', 'sandwich', 'pizza', 'donut', 'fruit', 'bread'
+      'cup', 'mug', 'glass', 'bottle', 'beverage', 'drink', 'latte', 'coffee', 'paper cup', 'plastic cup',
+      'plate', 'bowl', 'dish', 'spoon', 'fork', 'knife', 'tray', 'tableware',
+      'food', 'cake', 'sandwich', 'pizza', 'donut', 'fruit', 'bread', 'snack', 'toast', 'dessert', 'muffin'
     ];
 
+    // 1. ラベルをクリーンアップ
     const cleanedOutput = output.map((s: any) => {
       let clean = s.label.replace(/LABEL_\d+,?\s*/gi, '').trim();
       clean = clean.split(',')[0].trim();
       return { ...s, cleanLabel: clean || 'Object' };
     });
 
+    // 2. ホワイトリストに該当するものを優先
     const validTargets = cleanedOutput.filter((s: any) => {
       const l = s.cleanLabel.toLowerCase();
       return CAFE_TARGETS.some(kw => l.includes(kw));
     });
 
+    // 3. 面積が大きい順にソートして、最もふさわしい「主役」を選ぶ
+    // (面積の情報がない場合はリストの順番を優先)
     const targetObj = validTargets.length > 0 ? validTargets[0] : null;
+
+    // もしホワイトリストに何も引っかからなかった場合でも、
+    // 画像の中央付近にある「何か」を Object として救い上げるフォールバック
+    const fallbackObj = !targetObj && cleanedOutput.length > 0 
+      ? cleanedOutput.find(o => {
+          const b = this.estimateBounds(o);
+          return b.minX < 0.6 && b.maxX > 0.4; // 画面中央付近にあるもの
+        }) 
+      : null;
+
+    const finalTarget = targetObj || fallbackObj;
     const tableObj = cleanedOutput.find((s: any) => s.cleanLabel.toLowerCase().includes('table'));
 
     return {
       cleanedOutput: validTargets,
       analysis: {
-        container: targetObj ? { ...targetObj, label: targetObj.cleanLabel, bounds: this.estimateBounds(targetObj) } : null,
+        container: finalTarget ? { ...finalTarget, label: finalTarget.cleanLabel, bounds: this.estimateBounds(finalTarget) } : null,
         table: tableObj ? { ...tableObj, label: tableObj.cleanLabel, bounds: this.estimateBounds(tableObj) } : null,
       }
     };
