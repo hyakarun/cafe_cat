@@ -12,33 +12,29 @@ export class ShirettoPipeline {
     this.isInitializing = true;
     
     try {
-      // 外部サーバーの認証エラーを回避するためのクリーン設定
-      env.allowLocalModels = true; 
+      // 全ての設定をデフォルトにリセット（干渉を防ぐ）
+      env.allowLocalModels = false;
       env.useBrowserCache = true;
-      env.remoteHost = 'https://huggingface.co';
-      env.remotePathTemplate = '{model}/resolve/{revision}/{file}';
-
+      
       // @ts-ignore
       const isWebGPUSupported = !!navigator.gpu;
-      const device = isWebGPUSupported ? 'webgpu' : 'wasm';
-
+      
       try {
-        console.log(`Pivoting to Florence-2 VFM on ${device}...`);
-        // Florence-2 は物体の「意味」を深く理解する次世代モデル
+        console.log(`Initializing optimized SlimSAM engine...`);
         // @ts-ignore
-        this.segmenter = await pipeline('object-detection', 'Xenova/florence2-base', { 
-          device,
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', {
+          // @ts-ignore
+          device: isWebGPUSupported ? 'webgpu' : 'wasm',
           // @ts-ignore
           dtype: isWebGPUSupported ? 'fp16' : 'fp32'
         });
-        console.log(`AI Pipeline upgraded to Florence-2 Vision Foundation Model`);
+        console.log('AI Pipeline initialized successfully.');
       } catch (err) {
-        console.warn('Florence-2 failed, falling back to reliable DETR...', err);
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { device: 'wasm' });
+        console.warn('Advanced engine failed, using legacy fallback...', err);
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic');
       }
     } catch (error) {
-      console.error('All AI initialization attempts failed:', error);
-      // AIが起動しなくてもエラーで止めないように、ダミーの動作を許容する設計にする
+      console.error('AI initialization failed:', error);
     } finally {
       this.isInitializing = false;
     }
