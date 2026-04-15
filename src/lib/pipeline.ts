@@ -12,10 +12,12 @@ export class ShirettoPipeline {
     this.isInitializing = true;
     
     try {
-      // 認証エラー回避のため、最も標準的な設定に戻す
-      env.allowLocalModels = false;
+      // 外部サーバーの認証エラーを回避するためのクリーン設定
+      env.allowLocalModels = true; 
       env.useBrowserCache = true;
-      
+      env.remoteHost = 'https://huggingface.co';
+      env.remotePathTemplate = '{model}/resolve/{revision}/{file}';
+
       // @ts-ignore
       const isWebGPUSupported = !!navigator.gpu;
       const device = isWebGPUSupported ? 'webgpu' : 'wasm';
