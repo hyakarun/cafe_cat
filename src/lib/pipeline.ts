@@ -42,12 +42,45 @@ export class ShirettoPipeline {
     }
   }
 
-  async process(imageBuffer: string): Promise<any> {
+  async process(imageSource: string): Promise<any> {
     if (!this.segmenter) await this.init();
-    const result = await this.segmenter(imageBuffer);
-    const { analysis } = this.analyzeScene(result);
-    const placement = this.solvePlacement(analysis);
-    return placement;
+    try {
+      const output = await this.segmenter(imageSource);
+      const { allCleaned, analysis } = this.analyzeScene(output);
+      const placement = this.solvePlacement(analysis);
+      
+      const result = await this.drawCatToDataURL(imageSource, placement);
+      
+      return {
+        result,
+        debugInfo: {
+          labels: allCleaned.filter((s:any) => s.label !== 'object').map((s: any) => s.label),
+          placement,
+          analysis
+        }
+      };
+    } catch (error) {
+      console.error('Processing failed:', error);
+      throw error;
+    }
+  }
+
+  private async drawCatToDataURL(source: string, placement: any): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(source);
+        ctx.drawImage(img, 0, 0);
+        this.drawCat(canvas, placement);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      img.src = source;
+    });
   }
 
   private analyzeScene(output: any[]) {
