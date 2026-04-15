@@ -1,12 +1,26 @@
 /**
  * Shiretto Cat: Edge AI Pipeline Logic
- * (Segformer + Depth Anything アプローチによるリファクタリング)
  */
 import { pipeline, env } from '@xenova/transformers';
 
+const CAFE_BEHAVIORS: Record<string, { pose: string, anchor: 'rim' | 'base' | 'center', offset: number }> = {
+  'cup': { pose: 'peeking', anchor: 'rim', offset: 0.1 },
+  'mug': { pose: 'peeking', anchor: 'rim', offset: 0.1 },
+  'bottle': { pose: 'peeking', anchor: 'rim', offset: 0.15 },
+  'wine glass': { pose: 'peeking', anchor: 'rim', offset: 0.05 },
+  'plate': { pose: 'standing', anchor: 'rim', offset: 0.02 },
+  'bowl': { pose: 'peeking', anchor: 'rim', offset: 0.1 },
+  'sandwich': { pose: 'standing', anchor: 'rim', offset: -0.05 },
+  'bread': { pose: 'standing', anchor: 'rim', offset: -0.05 },
+  'cake': { pose: 'standing', anchor: 'rim', offset: -0.05 },
+  'toast': { pose: 'standing', anchor: 'rim', offset: -0.05 },
+  'chair': { pose: 'peeking', anchor: 'center', offset: 0.2 },
+  'table': { pose: 'walking', anchor: 'base', offset: 0 },
+  'default': { pose: 'walking', anchor: 'base', offset: 0 }
+};
+
 export class ShirettoPipeline {
   private segmenter: any = null;
-  private depthEstimator: any = null;
   private isInitializing = false;
 
   async init() {
@@ -15,21 +29,12 @@ export class ShirettoPipeline {
     try {
       env.allowLocalModels = false;
       env.useBrowserCache = true;
-      env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
       const isWebGPUSupported = !!navigator.gpu;
-      
-      // 1. セグメンテーションモデル（屋内・カフェ風景に強い）
-      this.segmenter = await pipeline('image-segmentation', 'Xenova/segformer-b0-finetuned-ade-512-512', {
+      // 最も汎用性が高く、カフェの小物を捉えやすいモデルを固定
+      this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', {
         device: isWebGPUSupported ? 'webgpu' : 'wasm',
         dtype: isWebGPUSupported ? 'fp16' : 'fp32'
       });
-
-      // 2. 深度推定モデル（奥行きの把握用）
-      this.depthEstimator = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf', {
-        device: isWebGPUSupported ? 'webgpu' : 'wasm',
-        dtype: isWebGPUSupported ? 'fp16' : 'fp32'
-      });
-
     } catch (error) {
       console.error('Core init failed:', error);
     } finally {
@@ -38,29 +43,21 @@ export class ShirettoPipeline {
   }
 
   async process(imageSource: string): Promise<any> {
-    if (!this.segmenter || !this.depthEstimator) await this.init();
+    if (!this.segmenter) await this.init();
     try {
-      // セグメンテーションと深度推定を並列で実行
-      const [segOutput, depthOutput] = await Promise.all([
-        this.segmenter(imageSource),
-        this.depthEstimator(imageSource)
-      ]);
+      const output = await this.segmenter(imageSource);
+      const sceneData = this.analyzeScene(output);
+      const placement = this.solvePlacement(sceneData.analysis);
 
-      // 1. カップや皿のマスク画像を正確に取得
-      const targetMask = this.findTargetMask(segOutput, ['cup', 'plate', 'table', 'bottle', 'bowl', 'drink', 'glass']);
-      
-      // 2. マスクの最上部（フチ）ではなく、奥行き（Depth）を考慮して配置座標とパースを計算
-      const placement = this.calculateSmartPlacement(targetMask, depthOutput);
+      const result = await this.drawCatToDataURL(imageSource, placement);
 
-      // 3. Canvasによる直書きではなく、事前アセットを自然に変形して合成
-      const result = await this.composeAsset(imageSource, placement, '/peeking_cat.svg');
-      
       return {
         result,
-        debugInfo: Object.assign({}, placement, { 
-            segOutputLength: segOutput?.length,
-            targetLabel: targetMask?.label
-        })
+        debugInfo: {
+          labels: sceneData.allCleaned.filter((s: any) => s.label !== 'object').map((s: any) => s.label),
+          placement,
+          analysis: sceneData.analysis
+        }
       };
     } catch (error) {
       console.error('Processing failed:', error);
@@ -68,78 +65,174 @@ export class ShirettoPipeline {
     }
   }
 
-  private findTargetMask(segOutput: any[], targetLabels: string[]) {
-    // 該当するラベル（カフェの小物やテーブル等）を優先的に主役として扱う
-    const targets = segOutput.filter((s: any) => {
-        const label = s.label.toLowerCase();
-        return targetLabels.some(t => label.includes(t));
-    });
-    
-    // 一番スコアや面積が大きい要素を特定（現在はシンプルに1番目を返す）
-    return targets[0] || segOutput[0]; 
-  }
-
-  private calculateSmartPlacement(target: any, depthOutput: any) {
-    if (!target) return { x: 0.5, y: 0.5, scale: 0.15, rotation: 0 };
-    
-    // TODO: 実際のDepthマップピクセル値から配置の奥深さを判定し、
-    // cv.findContours等の輪郭線に対して最適な重ね合わせ（Affine）行列を計算する処理を入れる。
-    // 今回は概念設計の第一段階として、対象物の中央・やや上（奥）のモック値を返す。
-    
-    const randomTilt = Math.random() > 0.5 ? 5 : -5;
-
-    return {
-        x: 0.5, // 画面中央付近
-        y: 0.45, // やや上（奥側）
-        scale: 0.2, // 猫のスケール
-        rotation: randomTilt,
-        reason: `Placed via smart depth logic for ${target?.label}`
-    };
-  }
-
-  private async composeAsset(source: string, placement: any, assetPath: string): Promise<string> {
+  private async drawCatToDataURL(source: string, placement: any): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      
       img.onload = () => {
         const canvas = document.createElement('canvas');
         canvas.width = img.width;
         canvas.height = img.height;
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(source);
-        
         ctx.drawImage(img, 0, 0);
-
-        // 事前に用意された高品質な透過SVG画像（猫）の合成レイヤーをロード
-        const overlay = new Image();
-        overlay.src = assetPath;
-        overlay.onload = () => {
-          ctx.save();
-          // 配置とアフィン変換（パース等の傾き処理）
-          const px = placement.x * canvas.width;
-          const py = placement.y * canvas.height;
-          const size = placement.scale * canvas.width;
-
-          ctx.translate(px, py);
-          ctx.rotate(placement.rotation * Math.PI / 180);
-          
-          // オーバーレイを配置（中央基準）
-          ctx.drawImage(overlay, -size / 2, -size / 2, size, size);
-          ctx.restore();
-
-          resolve(canvas.toDataURL('image/jpeg', 0.9));
-        };
-        overlay.onerror = () => {
-            console.error('Asset load error:', assetPath);
-            // 失敗時は元の画像をそのまま返す
-            resolve(canvas.toDataURL('image/jpeg', 0.9));
-        };
+        this.drawCat(canvas, placement);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
       };
-      img.onerror = () => {
-          resolve(source); // フォールバック
-      }
       img.src = source;
+    });
+  }
+
+  private analyzeScene(output: any[]) {
+    const all = output.map((s: any) => {
+      let label = s.label.replace(/LABEL_\d+,?\s*/gi, '').toLowerCase().split(',')[0].trim();
+      // IDからの緊急マッピング
+      if (!label && s.label.includes('187')) label = 'cup';
+      if (!label && s.label.includes('149')) label = 'bottle';
+      return { ...s, label: label || 'object', bounds: this.estimateBounds(s) };
+    });
+
+    // 「前景（下半分）にあるカフェアイテム」を最優先でスコアリング
+    const candidates = all.filter(o => o.bounds.maxY > 0.4 && o.bounds.maxY < 0.95);
+    const topItem = candidates.sort((a, b) => {
+      const aScore = (CAFE_BEHAVIORS[a.label] ? 100 : 0) + (a.bounds.maxY * 50);
+      const bScore = (CAFE_BEHAVIORS[b.label] ? 100 : 0) + (b.bounds.maxY * 50);
+      return bScore - aScore;
+    })[0] || all[0];
+
+    return {
+      allCleaned: all,
+      analysis: { target: topItem }
+    };
+  }
+
+  private solvePlacement(analysis: any) {
+    const obj = analysis.target;
+    if (!obj) return { x: 0.2, y: 0.8, scale: 0.12, rotation: -5, pose: 'walking', side: 'left' };
+
+    const b = obj.bounds;
+    const behavior = CAFE_BEHAVIORS[obj.label] || CAFE_BEHAVIORS['default'];
+
+    let px = (b.minX + b.maxX) / 2;
+    let py = b.minY; // 基本は上
+    let side = 'right';
+
+    if (behavior.anchor === 'rim') {
+      // 縁にひっかける
+      px = b.minX + (b.maxX - b.minX) * 0.7; // 少し右寄り
+      py = b.minY + ((b.maxY - b.minY) * behavior.offset);
+    } else if (behavior.anchor === 'base') {
+      // 地面に置く
+      py = b.maxY;
+    } else {
+      // 中央付近
+      py = b.minY + (b.maxY - b.minY) * behavior.offset;
+    }
+
+    // UI回避
+    if (px > 0.7 && py > 0.7) px = 0.2;
+
+    return {
+      x: Math.max(0.05, Math.min(0.95, px)),
+      y: Math.max(0.05, Math.min(0.95, py)),
+      scale: Math.max(0.08, Math.min(0.2, (b.maxX - b.minX) * 0.8)),
+      rotation: px > 0.5 ? 5 : -5,
+      pose: behavior.pose,
+      side: 'right',
+      reason: `Found ${obj.label}. Applied ${behavior.pose} on ${behavior.anchor}.`
+    };
+  }
+
+  private estimateBounds(segment: any) {
+    const mask = segment.mask;
+    let minX = mask.width, maxX = 0, minY = mask.height, maxY = 0;
+    for (let i = 0; i < mask.data.length; i++) {
+      if (mask.data[i] > 128) {
+        const x = i % mask.width;
+        const y = Math.floor(i / mask.width);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    return {
+      minX: minX / mask.width, maxX: maxX / mask.width,
+      minY: minY / mask.height, maxY: maxY / mask.height
+    };
+  }
+
+  drawCat(canvas: HTMLCanvasElement, placement: any) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { x, y, scale, rotation, pose, side } = placement;
+    const px = x * canvas.width;
+    const py = y * canvas.height;
+    const size = scale * canvas.width;
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rotation * Math.PI / 180);
+    this.generateCatLines(ctx, size, pose, side);
+    ctx.restore();
+  }
+
+  private generateCatLines(ctx: CanvasRenderingContext2D, size: number, pose: string, side: string) {
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = Math.max(1.5, size / 30); // さらに繊細に
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+    const dir = side === 'right' ? 1 : -1;
+    ctx.scale(dir, 1);
+
+    if (pose === 'peeking') {
+      ctx.beginPath();
+      // Face
+      ctx.moveTo(-size * 0.4, 0);
+      ctx.quadraticCurveTo(-size * 0.4, -size * 0.4, -size * 0.25, -size * 0.5);
+      ctx.lineTo(-size * 0.3, -size * 0.7);
+      ctx.lineTo(-size * 0.1, -size * 0.6);
+      ctx.quadraticCurveTo(0, -size * 0.65, size * 0.1, -size * 0.6);
+      ctx.lineTo(size * 0.3, -size * 0.7);
+      ctx.lineTo(size * 0.25, -size * 0.5);
+      ctx.quadraticCurveTo(size * 0.4, -size * 0.4, size * 0.4, 0);
+      // Paws
+      ctx.moveTo(-size * 0.45, 0); ctx.quadraticCurveTo(-size * 0.45, size * 0.05, -size * 0.35, size * 0.05); ctx.quadraticCurveTo(-size * 0.25, size * 0.05, -size * 0.25, 0);
+      ctx.moveTo(size * 0.25, 0); ctx.quadraticCurveTo(size * 0.25, size * 0.05, size * 0.35, size * 0.05); ctx.quadraticCurveTo(size * 0.45, size * 0.05, size * 0.45, 0);
+      ctx.stroke();
+      // Eyes
+      ctx.beginPath(); ctx.arc(-size * 0.12, -size * 0.35, size * 0.025, 0, Math.PI * 2); ctx.arc(size * 0.12, -size * 0.35, size * 0.025, 0, Math.PI * 2);
+      ctx.fillStyle = 'white'; ctx.fill();
+    } else if (pose === 'walking') {
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.8, -size * 0.2); // 尻尾
+      ctx.quadraticCurveTo(-size * 1.2, 0, -size * 0.8, size * 0.2);
+      ctx.quadraticCurveTo(-size * 0.5, -size * 0.2, -size * 0.3, -size * 0.6); // 背中
+      ctx.quadraticCurveTo(0, -size * 0.8, size * 0.2, -size * 1.0); // 首
+      ctx.lineTo(size * 0.25, -size * 1.2); // 耳
+      ctx.lineTo(size * 0.35, -size * 1.0);
+      ctx.quadraticCurveTo(size * 0.5, -size * 0.8, size * 0.45, -size * 0.4); // 顔
+      ctx.quadraticCurveTo(size * 0.35, 0, size * 0.3, -size * 0.1); // 前脚
+      ctx.stroke();
+    }
+  }
+}
+
+export const pipelineInstance = new ShirettoPipeline();
+ctx.restore();
+
+resolve(canvas.toDataURL('image/jpeg', 0.9));
+        };
+overlay.onerror = () => {
+  console.error('Asset load error:', assetPath);
+  // 失敗時は元の画像をそのまま返す
+  resolve(canvas.toDataURL('image/jpeg', 0.9));
+};
+      };
+img.onerror = () => {
+  resolve(source); // フォールバック
+}
+img.src = source;
     });
   }
 }
