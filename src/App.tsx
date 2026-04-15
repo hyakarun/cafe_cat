@@ -148,13 +148,14 @@ const App: React.FC = () => {
                   <div style={{ fontWeight: 700, marginBottom: '8px', color: 'var(--text-primary)' }}>Debug Information</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <div>
-                      <div style={{ color: 'var(--text-primary)' }}>Objects:</div>
-                      <div>{debugInfo.labels.join(', ')}</div>
+                      <div style={{ color: 'var(--text-primary)' }}>Targets Info:</div>
+                      <div>Elements: {debugInfo.segOutputLength || 0}</div>
+                      <div>Main Target: {debugInfo.targetLabel || 'None'}</div>
                     </div>
                     <div>
                       <div style={{ color: 'var(--text-primary)' }}>Placement:</div>
-                      <div>{debugInfo.placement.reason}</div>
-                      <div style={{ fontSize: '10px' }}>X: {debugInfo.placement.x.toFixed(2)}, Y: {debugInfo.placement.y.toFixed(2)}</div>
+                      <div>{debugInfo.reason || 'No reason'}</div>
+                      <div style={{ fontSize: '10px' }}>X: {debugInfo.x?.toFixed(2) ?? 0}, Y: {debugInfo.y?.toFixed(2) ?? 0}</div>
                     </div>
                   </div>
                 </div>
