@@ -53,7 +53,7 @@ export class ShirettoPipeline {
     console.log('AI Segmentation Raw Output:', output);
 
     // 2. Analyze Masks (Step A)
-    const analysis = this.analyzeSegments(output);
+    const { cleanedOutput, analysis } = this.analyzeSegments(output);
     
     // 3. Determine Placement (Step B & C)
     const placement = this.calculatePlacement(analysis);
@@ -64,7 +64,7 @@ export class ShirettoPipeline {
     return {
       result,
       debugInfo: {
-        labels: output.map((s: any) => s.label),
+        labels: cleanedOutput.map((s: any) => s.cleanLabel),
         placement,
         analysis
       }
@@ -94,8 +94,11 @@ export class ShirettoPipeline {
     const targetObj = container || secondary || (cleanedOutput.length > 0 ? cleanedOutput[0] : null);
 
     return {
-      container: targetObj ? { ...targetObj, label: targetObj.cleanLabel, bounds: this.estimateBounds(targetObj) } : null,
-      table: cleanedOutput.find((s: any) => s.cleanLabel.toLowerCase().includes('table')),
+      cleanedOutput,
+      analysis: {
+        container: targetObj ? { ...targetObj, label: targetObj.cleanLabel, bounds: this.estimateBounds(targetObj) } : null,
+        table: cleanedOutput.find((s: any) => s.cleanLabel.toLowerCase().includes('table')),
+      }
     };
   }
 
