@@ -72,11 +72,17 @@ export class ShirettoPipeline {
   }
 
   private analyzeSegments(output: any[]) {
-    // ラベルをクリーンアップ (LABEL_187 などを除去)
-    const cleanedOutput = output.map((s: any) => ({
-      ...s,
-      cleanLabel: s.label.includes('LABEL_') ? (s.label.split(',')[1]?.trim() || s.label) : s.label
-    }));
+    // ラベルをクリーンアップ (LABEL_187 などを正規表現で徹底除去)
+    const cleanedOutput = output.map((s: any) => {
+      let clean = s.label.replace(/LABEL_\d+,?\s*/gi, '').trim();
+      // カンマが残っている場合は最初の一つを採用
+      clean = clean.split(',')[0].trim();
+      
+      return {
+        ...s,
+        cleanLabel: clean || s.label || 'Object'
+      };
+    });
 
     // カフェに関連するオブジェクト（容器等）を優先的に探す
     const container = cleanedOutput.find((s: any) => {
