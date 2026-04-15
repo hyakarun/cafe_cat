@@ -137,76 +137,80 @@ export class ShirettoPipeline {
   }
 
   private calculatePlacement(analysis: any) {
-    const { container } = analysis;
+    const { container, table } = analysis;
 
-    if (!container) {
-      return { x: 0.8, y: 0.8, scale: 0.15, rotation: 10, reason: 'No object found' };
+    if (!container || !container.mask) {
+      return { x: 0.8, y: 0.8, scale: 0.15, rotation: 10, reason: 'AI could not find a clear object' };
     }
 
-    const b = container.bounds;
-    const boxWidth = b.maxX - b.minX;
-    const boxHeight = b.maxY - b.minY;
+    // AI解析: 境界点（エッジ）の抽出
+    const edges = this.extractGroundingEdges(container, table);
     
-    // 容器の右側、かつ下から30%くらい上（テーブルとの接地感）に配置
-    const x = b.maxX; 
-    const y = b.maxY - (boxHeight * 0.3);
+    // スコアリングによって「最も自然（しれっと）な場所」を選択
+    const bestPoint = edges.length > 0 ? edges[0] : { x: container.bounds.maxX, y: container.bounds.maxY };
     
-    // スケールは被写体のサイズに比例させる
-    const scale = Math.max(0.1, Math.min(0.2, boxWidth * 0.6));
+    // シーンの文脈（容器の大きさや位置）から猫のスタイルを決定
+    const boxWidth = container.bounds.maxX - container.bounds.minX;
+    const boxHeight = container.bounds.maxY - container.bounds.minY;
+    const isTall = boxHeight > boxWidth;
     
+    // 猫のポーズ案を生成 (覗き込み / 佇む / 隠れる)
+    const pose = isTall ? 'peeking' : 'sitting';
+    const side = bestPoint.x > (container.bounds.maxX + container.bounds.minX) / 2 ? 'right' : 'left';
+
     return {
-      // 画面外にはみ出ないように 10% ～ 90% の間に収める
-      x: Math.min(0.9, Math.max(0.1, x)),
-      y: Math.min(0.9, Math.max(0.1, y)),
-      scale: scale,
-      rotation: 15, // しれっと顔を出す傾き
-      reason: `Peeking from ${container.label}'s right edge`
+      x: bestPoint.x,
+      y: bestPoint.y,
+      scale: Math.max(0.12, Math.min(0.25, boxWidth * 1.2)),
+      rotation: side === 'right' ? 15 : -15,
+      pose,
+      side,
+      reason: `AI suggested ${side} side of the ${container.label} as a natural hiding spot.`
     };
   }
 
-  private async loadAndProcessCatAsset(): Promise<HTMLCanvasElement> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = '/cat_asset.png';
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = img.width;
-        c.height = img.height;
-        const ctx = c.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return resolve(c);
+  /**
+   * マスクデータを精査し、容器がテーブルと接しているエッジポイントを抽出する
+   */
+  private extractGroundingEdges(container: any, table: any) {
+    const mask = container.mask;
+    const data = mask.data;
+    const width = mask.width;
+    const height = mask.height;
+    const channels = mask.channels || (data.length / (width * height));
+    
+    const candidates: {x: number, y: number, score: number}[] = [];
+
+    // 容器の下端 20% の領域を重点的に走査
+    const startY = Math.floor(container.bounds.minY * height + (container.bounds.maxY - container.bounds.minY) * height * 0.7);
+    const endY = Math.floor(container.bounds.maxY * height);
+
+    for (let y = startY; y < endY; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * channels;
+        const alpha = channels === 4 ? data[idx + 3] : data[idx];
         
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, c.width, c.height);
-        const data = imgData.data;
-        
-        // #00FF00 (ネオングリーン) をクロマキー処理で透過
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          
-          if (g > 200 && r < 50 && b < 50) {
-            data[i + 3] = 0; // 完全に透過
-          } else if (g > 150 && r < 100 && b < 100) {
-            // エッジのアンチエイリアス処理
-            data[i + 3] = Math.max(0, data[i + 3] - (g - 150));
+        if (alpha > 128) {
+          // 容器の左右端を検出
+          const isEdge = x < (container.bounds.minX * width + 5) || x > (container.bounds.maxX * width - 5);
+          if (isEdge) {
+            candidates.push({ 
+              x: x / width, 
+              y: y / height, 
+              score: y // 下にあるほどスコアが高い（接地面に近い）
+            });
           }
         }
-        ctx.putImageData(imgData, 0, 0);
-        resolve(c);
-      };
-      img.onerror = () => {
-        console.warn("Cat asset not found or failed to load");
-        const c = document.createElement('canvas'); // 空のキャンバス
-        resolve(c);
-      };
-    });
+      }
+    }
+
+    return candidates.sort((a, b) => b.score - a.score);
   }
 
+  /**
+   * AIの提案に基づき、その場に最適化されたミニマルな猫を生成（描画）する
+   */
   private async drawCat(source: string, placement: any, analysis: any): Promise<string> {
-    // まずAI生成の猫アセットをロード＆透過処理
-    const catCanvas = await this.loadAndProcessCatAsset();
-
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -217,38 +221,86 @@ export class ShirettoPipeline {
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(source);
 
-        // 1. 元の写真をベースとして描画
         ctx.drawImage(img, 0, 0);
 
-        // 2. 猫のサイズと位置を計算
-        // 画像は手描き線より大きいので、スケールを少し強めに乗算します
-        const catSize = img.width * placement.scale * 1.8;
-        const x = img.width * placement.x;
-        const y = img.height * placement.y;
+        const { x, y, scale, rotation, pose, side } = placement;
+        const px = x * canvas.width;
+        const py = y * canvas.height;
+        const size = scale * canvas.width;
 
         ctx.save();
-        ctx.translate(x, y);
-        // しれっと覗くような少しの傾き
-        ctx.rotate(placement.rotation * Math.PI / 180);
+        ctx.translate(px, py);
+        ctx.rotate(rotation * Math.PI / 180);
 
-        // 自然に見せるためのドロップシャドウ
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = 'rgba(0,0,0,0.4)';
-        ctx.shadowOffsetY = 5;
-
-        if (catCanvas.width > 0) {
-          // 元画像の縦横比を維持しながら描画
-          const aspect = catCanvas.height / catCanvas.width;
-          const h = catSize * aspect;
-          // (x, y) が猫の中心(足元ではなく胴の中心)になるようにオフセット
-          ctx.drawImage(catCanvas, -catSize / 2, -h * 0.4, catSize, h);
-        }
+        // クリーンな白い線画の猫を生成的に描画
+        this.generateCatLines(ctx, size, pose, side);
 
         ctx.restore();
         resolve(canvas.toDataURL('image/jpeg', 0.9));
       };
       img.src = source;
     });
+  }
+
+  private generateCatLines(ctx: CanvasRenderingContext2D, size: number, pose: string, side: string) {
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = Math.max(3, size / 15);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    // わずかに外光が反射しているようなグロー効果
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
+
+    const dir = side === 'right' ? 1 : -1;
+    
+    ctx.beginPath();
+    
+    if (pose === 'peeking') {
+      // 覗き込みポーズの生成
+      // 耳
+      ctx.moveTo(-size * 0.3 * dir, -size * 0.5);
+      ctx.lineTo(-size * 0.4 * dir, -size * 0.9);
+      ctx.lineTo(-size * 0.1 * dir, -size * 0.6);
+      
+      // 頭のライン
+      ctx.quadraticCurveTo(size * 0.2 * dir, -size * 0.8, size * 0.5 * dir, -size * 0.5);
+      
+      // 反対の耳
+      ctx.lineTo(size * 0.6 * dir, -size * 0.8);
+      ctx.lineTo(size * 0.7 * dir, -size * 0.4);
+      
+      // 顔の輪郭
+      ctx.quadraticCurveTo(size * 0.6 * dir, 0, 0, 0);
+      
+      // 閉じた目（しれっと感）
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.lineWidth = Math.max(2, size / 25);
+      ctx.moveTo(size * 0.1 * dir, -size * 0.4);
+      ctx.lineTo(size * 0.25 * dir, -size * 0.4);
+      ctx.moveTo(size * 0.45 * dir, -size * 0.35);
+      ctx.lineTo(size * 0.55 * dir, -size * 0.35);
+    } else {
+      // 佇むポーズの生成
+      // 背中
+      ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(-size * 0.4 * dir, -size * 0.2, -size * 0.5 * dir, -size * 0.8);
+      // 頭
+      ctx.quadraticCurveTo(-size * 0.5 * dir, -size * 1.1, -size * 0.2 * dir, -size * 1.2);
+      // 耳
+      ctx.lineTo(-size * 0.3 * dir, -size * 1.4);
+      ctx.lineTo(-size * 0.1 * dir, -size * 1.25);
+      ctx.lineTo(size * 0.1 * dir, -size * 1.4);
+      ctx.lineTo(size * 0.2 * dir, -size * 1.2);
+      // 前面
+      // しっぽ
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.4 * dir, -size * 0.2);
+      ctx.quadraticCurveTo(-size * 0.8 * dir, -size * 0.1, -size * 0.7 * dir, -size * 0.4);
+      ctx.stroke();
+    }
   }
 }
 
