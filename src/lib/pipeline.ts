@@ -15,6 +15,7 @@ export class ShirettoPipeline {
     try {
       env.allowLocalModels = false;
       env.useBrowserCache = true;
+      env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
       const isWebGPUSupported = !!navigator.gpu;
       
       // 1. セグメンテーションモデル（屋内・カフェ風景に強い）
