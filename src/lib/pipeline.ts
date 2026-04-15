@@ -72,19 +72,30 @@ export class ShirettoPipeline {
   }
 
   private analyzeSegments(output: any[]) {
-    // 容器、テーブル、中身などの領域を整理
-    const container = output.find((s: any) => {
-      const l = s.label.toLowerCase();
-      return ['cup', 'bowl', 'bottle', 'plate', 'mug', 'coffee', 'glass'].some(kw => l.includes(kw));
+    // ラベルをクリーンアップ (LABEL_187 などを除去)
+    const cleanedOutput = output.map((s: any) => ({
+      ...s,
+      cleanLabel: s.label.includes('LABEL_') ? (s.label.split(',')[1]?.trim() || s.label) : s.label
+    }));
+
+    // カフェに関連するオブジェクト（容器等）を優先的に探す
+    const container = cleanedOutput.find((s: any) => {
+      const l = s.cleanLabel.toLowerCase();
+      // 優先度の高いカフェアイテム
+      return ['cup', 'bowl', 'bottle', 'plate', 'mug', 'coffee', 'glass', 'tableware'].some(kw => l.includes(kw));
     });
-    const table = output.find((s: any) => ['table', 'desk', 'surface', 'cloth'].some(kw => s.label.toLowerCase().includes(kw)));
+
+    // カフェアイテムがない場合、椅子などの家具や他の大きな物体を対象にする
+    const secondary = cleanedOutput.find((s: any) => {
+      const l = s.cleanLabel.toLowerCase();
+      return ['chair', 'table', 'desk', 'laptop', 'cell phone'].some(kw => l.includes(kw));
+    });
     
-    // 見つからなかった場合は、面積がマズマズ大きいオブジェクトをフォールバックにする（一旦1つ目の結果）
-    const targetObj = container || (output.length > 0 ? output[0] : null);
+    const targetObj = container || secondary || (cleanedOutput.length > 0 ? cleanedOutput[0] : null);
 
     return {
-      container: targetObj ? { ...targetObj, bounds: this.estimateBounds(targetObj) } : null,
-      table: table ? { ...table, bounds: this.estimateBounds(table) } : null,
+      container: targetObj ? { ...targetObj, label: targetObj.cleanLabel, bounds: this.estimateBounds(targetObj) } : null,
+      table: cleanedOutput.find((s: any) => s.cleanLabel.toLowerCase().includes('table')),
     };
   }
 
