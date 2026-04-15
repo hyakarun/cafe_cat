@@ -21,20 +21,18 @@ export class ShirettoPipeline {
       const device = isWebGPUSupported ? 'webgpu' : 'wasm';
 
       try {
-        console.log(`Attempting to load high-precision model on ${device}...`);
+        console.log(`Pivoting to Florence-2 VFM on ${device}...`);
+        // Florence-2 は物体の「意味」を深く理解する次世代モデル
         // @ts-ignore
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { 
+        this.segmenter = await pipeline('object-detection', 'Xenova/florence2-base', { 
           device,
           // @ts-ignore
           dtype: isWebGPUSupported ? 'fp16' : 'fp32'
         });
-        console.log(`AI Pipeline initialized on ${device}`);
+        console.log(`AI Pipeline upgraded to Florence-2 Vision Foundation Model`);
       } catch (err) {
-        console.warn('Primary model failed, trying fallback model...', err);
-        // フォールバック: より普及している軽量パスを試す
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { 
-          device: 'wasm' 
-        });
+        console.warn('Florence-2 failed, falling back to reliable DETR...', err);
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { device: 'wasm' });
       }
     } catch (error) {
       console.error('All AI initialization attempts failed:', error);
