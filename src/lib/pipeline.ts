@@ -14,7 +14,6 @@ export class ShirettoPipeline {
     try {
       env.allowLocalModels = false;
       env.useBrowserCache = true;
-      // WebGPU/WASM 安定化
       // @ts-ignore
       if (env.backends?.onnx) {
         env.backends.onnx.wasm.proxy = false; 
@@ -26,17 +25,17 @@ export class ShirettoPipeline {
       const device = isWebGPUSupported ? 'webgpu' : 'wasm';
 
       try {
-        // iOSアプリ化を見据え、より高精度で軽量な SlimSAM にアップグレード
+        // SlimSAMのロードエラーを受け、より安定して高精度な Mask2Former に切り替え
         // @ts-ignore
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { 
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/mask2former-swin-tiny-coco-panoptic', { 
           device,
           // @ts-ignore
           dtype: isWebGPUSupported ? 'fp16' : 'fp32' 
         });
-        console.log(`AI Pipeline upgraded to SlimSAM on ${device}`);
+        console.log(`AI Pipeline upgraded to Mask2Former on ${device}`);
       } catch (err) {
-        console.warn('SlimSAM WebGPU failed, falling back to wasm...', err);
-        this.segmenter = await pipeline('image-segmentation', 'Xenova/slimsam-0.125-unified', { device: 'wasm' });
+        console.warn('Primary AI failed, falling back to basic set...', err);
+        this.segmenter = await pipeline('image-segmentation', 'Xenova/detr-resnet-50-panoptic', { device: 'wasm' });
       }
     } catch (error) {
       console.error('Core upgrade failed:', error);
