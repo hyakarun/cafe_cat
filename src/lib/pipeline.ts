@@ -140,7 +140,8 @@ export class ShirettoPipeline {
 
   private calculatePlacement(analysis: any) {
     const { container } = analysis;
-    if (!container) return { x: 0.8, y: 0.8, scale: 0.15, rotation: 10, reason: 'No cafe items found' };
+    // デフォルト: 見つからない場合は中央左寄りの影にひっそり
+    if (!container) return { x: 0.2, y: 0.6, scale: 0.15, rotation: -5, pose: 'walking', side: 'left', reason: 'Shadow search' };
 
     const b = container.bounds;
     const centerX = (b.minX + b.maxX) / 2;
@@ -148,39 +149,46 @@ export class ShirettoPipeline {
     const height = b.maxY - b.minY;
     const isVertical = height > width;
 
-    let px, py, pose;
+    let px, py, pose, side;
+
     if (isVertical) {
-      px = centerX + (width * 0.45); 
-      py = b.maxY - (height * 0.15);
+      // コップなどの縦長：上端から「覗き」
+      px = centerX + (width * 0.1); 
+      py = b.minY + (height * 0.05); // 上端に近い位置
       pose = 'peeking';
+      side = 'right';
     } else {
-      px = b.maxX - (width * 0.1);
-      py = b.maxY + (height * 0.05);
-      pose = 'sitting';
+      // 皿・パンなどの平坦：その上に「佇む」 or 足元で「歩く」
+      if (Math.random() > 0.5) {
+        px = b.minX + (width * 0.3);
+        py = b.minY - (height * 0.1); // 物体の上に少し浮く（足が着く位置）
+        pose = 'standing';
+        side = 'right';
+      } else {
+        px = b.maxX + 0.05;
+        py = b.maxY;
+        pose = 'walking';
+        side = 'left';
+      }
     }
 
-    const pm = Math.max(0.8, Math.min(1.5, py * 1.5));
-    const side = px > centerX ? 'right' : 'left';
-
-    // UI回避ロジック: 右下 (X: 0.7~1.0, Y: 0.7~1.0) はシェアボタンやアイコンがあるため避ける
+    const pm = Math.max(0.7, Math.min(1.2, py));
+    
+    // UI回避
     let finalX = Math.min(0.9, Math.max(0.1, px));
     let finalY = Math.min(0.9, Math.max(0.1, py));
-
-    const isNearBottomRight = finalX > 0.7 && finalY > 0.7;
-    if (isNearBottomRight) {
-      finalX = 0.2 + (Math.random() * 0.1);
-      finalY = b.maxY;
-      pose = 'sitting';
+    if (finalX > 0.7 && finalY > 0.7) { 
+      finalX = 0.2; finalY = b.maxY; pose = 'walking';
     }
 
     return {
       x: finalX,
       y: finalY,
-      scale: Math.max(0.1, Math.min(0.25, (width * 0.8) * pm)),
-      rotation: finalX > 0.5 ? 12 : -12,
+      scale: Math.max(0.08, Math.min(0.18, (width * 0.6) * pm)),
+      rotation: finalX > 0.5 ? 8 : -8,
       pose,
-      side: finalX > 0.5 ? 'right' : 'left',
-      reason: `AI detected ${container.label}. Adjusted to avoid UI.`
+      side,
+      reason: `AI detected ${container.label}. Placed at ${pose === 'peeking' ? 'top rim' : 'surface'}.`
     };
   }
 
