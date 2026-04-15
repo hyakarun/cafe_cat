@@ -161,14 +161,25 @@ export class ShirettoPipeline {
     const pm = Math.max(0.8, Math.min(1.5, py * 1.5));
     const side = px > centerX ? 'right' : 'left';
 
+    // UI回避ロジック: 右下 (X: 0.7~1.0, Y: 0.7~1.0) はシェアボタンやアイコンがあるため避ける
+    let finalX = Math.min(0.9, Math.max(0.1, px));
+    let finalY = Math.min(0.9, Math.max(0.1, py));
+
+    const isNearBottomRight = finalX > 0.7 && finalY > 0.7;
+    if (isNearBottomRight) {
+      finalX = 0.2 + (Math.random() * 0.1);
+      finalY = b.maxY;
+      pose = 'sitting';
+    }
+
     return {
-      x: Math.min(0.9, Math.max(0.1, px)),
-      y: Math.min(0.9, Math.max(0.1, py)),
+      x: finalX,
+      y: finalY,
       scale: Math.max(0.1, Math.min(0.25, (width * 0.8) * pm)),
-      rotation: side === 'right' ? 12 : -12,
+      rotation: finalX > 0.5 ? 12 : -12,
       pose,
-      side,
-      reason: `AI recognized a ${isVertical ? 'tall' : 'flat'} ${container.label}.`
+      side: finalX > 0.5 ? 'right' : 'left',
+      reason: `AI detected ${container.label}. Adjusted to avoid UI.`
     };
   }
 
