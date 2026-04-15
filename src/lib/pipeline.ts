@@ -46,17 +46,17 @@ export class ShirettoPipeline {
     if (!this.segmenter) await this.init();
     try {
       const output = await this.segmenter(imageSource);
-      const { allCleaned, analysis } = this.analyzeScene(output);
-      const placement = this.solvePlacement(analysis);
+      const sceneData = this.analyzeScene(output);
+      const placement = this.solvePlacement(sceneData.analysis);
       
       const result = await this.drawCatToDataURL(imageSource, placement);
       
       return {
         result,
         debugInfo: {
-          labels: allCleaned.filter((s:any) => s.label !== 'object').map((s: any) => s.label),
+          labels: sceneData.allCleaned.filter((s:any) => s.label !== 'object').map((s: any) => s.label),
           placement,
-          analysis
+          analysis: sceneData.analysis
         }
       };
     } catch (error) {
@@ -100,7 +100,10 @@ export class ShirettoPipeline {
       return bScore - aScore;
     })[0] || all[0];
 
-    return { analysis: { target: topItem } };
+    return { 
+      allCleaned: all,
+      analysis: { target: topItem } 
+    };
   }
 
   private solvePlacement(analysis: any) {
