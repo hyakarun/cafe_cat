@@ -214,44 +214,70 @@ export class ShirettoPipeline {
 
   private generateCatLines(ctx: CanvasRenderingContext2D, size: number, pose: string, side: string) {
     ctx.strokeStyle = 'white';
-    ctx.lineWidth = Math.max(3, size / 15);
+    ctx.lineWidth = Math.max(2, size / 25); // 線を細めに、より洗練された印象に
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
-    const dir = side === 'right' ? 1 : -1;
-    ctx.beginPath();
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.4)';
     
+    const dir = side === 'right' ? 1 : -1;
+    ctx.scale(dir, 1); // 向きを反転
+
     if (pose === 'peeking') {
-      ctx.moveTo(-size * 0.3 * dir, -size * 0.5);
-      ctx.lineTo(-size * 0.4 * dir, -size * 0.9);
-      ctx.lineTo(-size * 0.1 * dir, -size * 0.6);
-      ctx.quadraticCurveTo(size * 0.2 * dir, -size * 0.8, size * 0.5 * dir, -size * 0.5);
-      ctx.lineTo(size * 0.6 * dir, -size * 0.8);
-      ctx.lineTo(size * 0.7 * dir, -size * 0.4);
-      ctx.quadraticCurveTo(size * 0.6 * dir, 0, 0, 0);
-      ctx.stroke();
+      // 「覗き (Peek)」の再現
       ctx.beginPath();
-      ctx.lineWidth = Math.max(2, size / 25);
-      ctx.moveTo(size * 0.1 * dir, -size * 0.4);
-      ctx.lineTo(size * 0.25 * dir, -size * 0.4);
-      ctx.moveTo(size * 0.45 * dir, -size * 0.35);
-      ctx.lineTo(size * 0.55 * dir, -size * 0.35);
+      // 顔（輪郭）
+      ctx.moveTo(-size * 0.4, 0);
+      ctx.quadraticCurveTo(-size * 0.4, -size * 0.4, -size * 0.25, -size * 0.5); // 左頬
+      ctx.lineTo(-size * 0.3, -size * 0.7); // 左耳外側
+      ctx.lineTo(-size * 0.1, -size * 0.6); // 左耳内側
+      ctx.quadraticCurveTo(0, -size * 0.65, size * 0.1, -size * 0.6); // 頭頂部
+      ctx.lineTo(size * 0.3, -size * 0.7); // 右耳内側
+      ctx.lineTo(size * 0.25, -size * 0.5); // 右耳外側
+      ctx.quadraticCurveTo(size * 0.4, -size * 0.4, size * 0.4, 0); // 右頬
+      
+      // 手 (Paws)
+      // 左手
+      ctx.moveTo(-size * 0.45, 0);
+      ctx.quadraticCurveTo(-size * 0.45, size * 0.05, -size * 0.35, size * 0.05);
+      ctx.quadraticCurveTo(-size * 0.25, size * 0.05, -size * 0.25, 0);
+      // 右手
+      ctx.moveTo(size * 0.25, 0);
+      ctx.quadraticCurveTo(size * 0.25, size * 0.05, size * 0.35, size * 0.05);
+      ctx.quadraticCurveTo(size * 0.45, size * 0.05, size * 0.45, 0);
+      ctx.stroke();
+
+      // 目 (Eyes) - しれっとした表情
+      ctx.beginPath();
+      ctx.arc(-size * 0.12, -size * 0.35, size * 0.03, 0, Math.PI * 2);
+      ctx.arc(size * 0.12, -size * 0.35, size * 0.03, 0, Math.PI * 2);
+      ctx.fillStyle = 'white';
+      ctx.fill();
+    } else if (pose === 'walking') {
+      // 「歩く (Walk)」の再現
+      ctx.beginPath();
+      ctx.moveTo(-size * 0.8, -size * 0.3); // 尻尾の先
+      ctx.quadraticCurveTo(-size * 1.0, -size * 0.1, -size * 0.7, -size * 0.15); // 尻尾
+      ctx.quadraticCurveTo(-size * 0.4, -size * 0.5, -size * 0.2, -size * 0.5); // 背中
+      ctx.quadraticCurveTo(size * 0.1, -size * 0.6, size * 0.3, -size * 0.9); // 首〜頭
+      ctx.lineTo(size * 0.35, -size * 1.0); // 耳
+      ctx.lineTo(size * 0.45, -size * 0.9);
+      ctx.quadraticCurveTo(size * 0.6, -size * 0.7, size * 0.5, -size * 0.5); // 顔
+      ctx.quadraticCurveTo(size * 0.3, -size * 0.3, size * 0.3, -size * 0.1); // 前脚
+      ctx.stroke();
     } else {
-      ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(-size * 0.4 * dir, -size * 0.2, -size * 0.5 * dir, -size * 0.8);
-      ctx.quadraticCurveTo(-size * 0.5 * dir, -size * 1.1, -size * 0.2 * dir, -size * 1.2);
-      ctx.lineTo(-size * 0.3 * dir, -size * 1.4);
-      ctx.lineTo(-size * 0.1 * dir, -size * 1.25);
-      ctx.lineTo(size * 0.1 * dir, -size * 1.4);
-      ctx.lineTo(size * 0.2 * dir, -size * 1.2);
-      ctx.quadraticCurveTo(size * 0.4 * dir, -size * 1.0, size * 0.3 * dir, 0);
-      ctx.stroke();
+      // 「佇む (Stand)」の再現
       ctx.beginPath();
-      ctx.moveTo(-size * 0.4 * dir, -size * 0.2);
-      ctx.quadraticCurveTo(-size * 0.8 * dir, -size * 0.1, -size * 0.7 * dir, -size * 0.4);
+      ctx.moveTo(-size * 0.8, -size * 0.2); // 尻尾
+      ctx.quadraticCurveTo(-size * 1.2, 0, -size * 0.8, size * 0.2);
+      ctx.quadraticCurveTo(-size * 0.5, -size * 0.2, -size * 0.3, -size * 0.6); // 背中
+      ctx.quadraticCurveTo(0, -size * 0.8, size * 0.2, -size * 1.0); // 首
+      ctx.lineTo(size * 0.25, -size * 1.2); // 耳
+      ctx.lineTo(size * 0.35, -size * 1.0);
+      ctx.quadraticCurveTo(size * 0.5, -size * 0.8, size * 0.45, -size * 0.4); // 顔
+      ctx.quadraticCurveTo(size * 0.35, 0, size * 0.3, -size * 0.1); // 前脚
+      ctx.stroke();
     }
-    ctx.stroke();
   }
 }
 
