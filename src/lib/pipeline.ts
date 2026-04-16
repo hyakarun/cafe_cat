@@ -79,7 +79,7 @@ class ShirettoPipeline {
 
   private async _loadModels(): Promise<void> {
     try {
-      const { pipeline, env } = await import('@huggingface/transformers');
+      const { pipeline, env } = await import('@xenova/transformers');
       env.allowLocalModels = false;
       env.useBrowserCache = true;
 
