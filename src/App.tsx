@@ -6,6 +6,7 @@ import Navbar from './components/Navbar';
 import HeroSection from './components/HeroSection';
 import ImageCard from './components/ImageCard';
 import DebugPanel from './components/DebugPanel';
+import LoadingScreen from './components/LoadingScreen';
 import './index.css';
 
 type Screen = 'landing' | 'preview' | 'loading' | 'result';
@@ -102,33 +103,8 @@ const App: React.FC = () => {
           {/* ③ ローディング */}
           {screen === 'loading' && (
             <motion.div key="loading" variants={pageVariants} initial="initial" animate="animate" exit="exit"
-              className="loading-screen">
-              <div className="loading-cat-wrap">
-                <motion.div
-                  className="loading-paw"
-                  animate={{ rotate: [0, -15, 15, -10, 10, 0] }}
-                  transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-                >
-                  🐾
-                </motion.div>
-                <motion.div
-                  className="loading-dots"
-                  animate={{ opacity: [0.3, 1, 0.3] }}
-                  transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-                >
-                  ・・・
-                </motion.div>
-              </div>
-              <p className="loading-title">猫を忍び込ませ中</p>
-              <p className="loading-sub">AIがシーンを解析しています。しばらくお待ちください。</p>
-              {/* ローディングバー */}
-              <div className="loading-bar-bg">
-                <motion.div
-                  className="loading-bar-fill"
-                  animate={{ x: ['-100%', '100%'] }}
-                  transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                />
-              </div>
+              style={{ width: '100%' }}>
+              <LoadingScreen />
             </motion.div>
           )}
 

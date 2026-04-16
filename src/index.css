@@ -489,18 +489,90 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .loading-bar-bg {
-  width: 220px;
-  height: 3px;
+  width: 240px;
+  height: 4px;
   background: var(--border-subtle);
-  border-radius: 2px;
+  border-radius: 4px;
   overflow: hidden;
+  margin-bottom: 20px;
 }
 
 .loading-bar-fill {
-  width: 60%;
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 4px;
+  width: 0%;
+}
+
+/* 3ステップ インジケーター */
+.loading-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 20px 0 24px;
+}
+
+.loading-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+/* ステップ間の連結線 */
+.loading-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: calc(50% + 10px);
+  width: 48px;
+  height: 2px;
+  background: var(--border-subtle);
+  border-radius: 1px;
+}
+
+.loading-step.done:not(:last-child)::after,
+.loading-step.active:not(:last-child)::after {
+  background: var(--accent-soft);
+}
+
+.loading-step-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border-subtle);
+  border: 2px solid var(--border-subtle);
+  transition: all 0.4s ease;
+  margin: 0 36px;
+}
+
+.loading-step.active .loading-step-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(176, 92, 58, 0.15);
+}
+
+.loading-step.done .loading-step-dot {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.loading-step-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.loading-step.active .loading-step-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.loading-step.done .loading-step-label {
+  color: var(--text-secondary);
 }
 
 /* ========================================
