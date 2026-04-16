@@ -325,10 +325,11 @@ class ShirettoPipeline {
 
         const cat = new Image();
         cat.crossOrigin = 'anonymous';
-        cat.src = '/peeking_cat.png';
+        cat.src = this.pickCatAsset(); // ランダム選択
 
         cat.onload = () => {
           catCtx.save();
+          catCtx.globalCompositeOperation = 'screen'; // 白線画を自然に合成
           catCtx.translate(px, py);
           catCtx.rotate((placement.rotation * Math.PI) / 180);
           catCtx.drawImage(cat, -size / 2, -size / 2, size, size);
@@ -423,6 +424,12 @@ class ShirettoPipeline {
     catCtx.globalCompositeOperation = 'destination-out';
     catCtx.drawImage(maskCanvas, 0, 0);
     catCtx.globalCompositeOperation = 'source-over';
+  }
+
+  /** public/white_cat_1〜22 からランダムに1枚選ぶ */
+  private pickCatAsset(): string {
+    const n = Math.floor(Math.random() * 22) + 1; // 1〜22
+    return `/white_cat_${n}.png`;
   }
 
   /** 猫アセットが読み込めない場合のフォールバック線画 */
