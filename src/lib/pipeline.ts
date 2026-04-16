@@ -7,10 +7,7 @@
  *   3. Occlusion masking              —— セグメントマスクで物体の陰に隠す
  */
 
-import type {
-  ImageSegmentationPipeline,
-  DepthEstimationPipeline,
-} from '@huggingface/transformers';
+// 型は any で扱い、@huggingface/transformers v4 の型差異を吸収する
 
 /* ─── 型定義 ────────────────────────────────────────────────── */
 
@@ -68,8 +65,8 @@ function isTargetLabel(label: string): boolean {
 /* ─── パイプライン本体 ──────────────────────────────────────── */
 
 class ShirettoPipeline {
-  private segmenter: ImageSegmentationPipeline | null = null;
-  private depthEstimator: DepthEstimationPipeline | null = null;
+  private segmenter: any = null;
+  private depthEstimator: any = null;
   private initPromise: Promise<void> | null = null;
   private modelReady = false;
 
@@ -88,17 +85,22 @@ class ShirettoPipeline {
 
       console.log('[Pipeline] モデル読み込み開始...');
 
-      // セグメンテーション（物体の場所検出）
+      // セグメンテーション — v4 で動作確認済みモデル
       this.segmenter = await pipeline(
         'image-segmentation',
-        'Xenova/segformer-b0-finetuned-ade-512-512',
-      ) as ImageSegmentationPipeline;
+        'Xenova/detr-resnet-50-panoptic',
+      );
 
-      // 深度推定（奥行き感の取得）
-      this.depthEstimator = await pipeline(
-        'depth-estimation',
-        'Xenova/depth-anything-small-hf',
-      ) as DepthEstimationPipeline;
+      // 深度推定（失敗してもセグメンテーションだけで動作継続）
+      try {
+        this.depthEstimator = await pipeline(
+          'depth-estimation',
+          'Xenova/depth-anything-small-hf',
+        );
+        console.log('[Pipeline] 深度推定モデルも読み込み完了 ✓');
+      } catch (depthErr) {
+        console.warn('[Pipeline] 深度推定モデルは省略:', depthErr);
+      }
 
       this.modelReady = true;
       console.log('[Pipeline] モデル読み込み完了 ✓');
