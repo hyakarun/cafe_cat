@@ -16,7 +16,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onSelectImage }) => (
     transition={{ duration: 0.3 }}
   >
     <h1 className="headline">
-      日常に、<br />しれっと猫を。
+      日常に、<br /><em>しれっと</em>猫を。
     </h1>
     <p className="subheadline">
       AIがあなたのカフェ写真に、ミニマルな猫をこっそり忍び込ませます。
