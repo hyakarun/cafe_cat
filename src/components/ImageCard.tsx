@@ -45,16 +45,7 @@ const ImageCard: React.FC<ImageCardProps> = ({
           </div>
         )}
 
-        {processedImage && !isProcessing && (
-          <motion.div
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', bounce: 0.5 }}
-            className="processed-element"
-          >
-            <Cat size={40} color="var(--brand-red)" />
-          </motion.div>
-        )}
+
       </div>
 
       <div className="card-content">
