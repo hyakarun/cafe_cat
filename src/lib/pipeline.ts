@@ -325,7 +325,7 @@ class ShirettoPipeline {
 
         const cat = new Image();
         cat.crossOrigin = 'anonymous';
-        cat.src = this.pickCatAsset(); // ランダム選択
+        cat.src = this.pickCatAsset(placement.pose); // ポーズ別に選択
 
         cat.onload = () => {
           catCtx.save();
@@ -426,10 +426,23 @@ class ShirettoPipeline {
     catCtx.globalCompositeOperation = 'source-over';
   }
 
-  /** public/white_cat_1〜22 からランダムに1枚選ぶ */
-  private pickCatAsset(): string {
-    const n = Math.floor(Math.random() * 22) + 1; // 1〜22
-    return `/white_cat_${n}.png`;
+  /** AIのポーズ判定に応じて対応するカテゴリの画像をランダムに返す */
+  private pickCatAsset(pose: string): string {
+    const POSE_MAP: Record<string, string[]> = {
+      peeking:  ['座り', '座り2', '座り3', '座り4', '座り5', '座り6', '座り7', '座り8'],
+      standing: ['佇む', '佇む2', '佇む3', '佇む4', '佇む5'],
+      walking:  ['歩き1'],
+      // テーブル面・フォールバックは寝転がりも候補に
+      lying:    ['寝転がり', '寝転がり2', '寝転がり3', '寝転がり4', '寝転がり5', '寝転がり6', '寝転がり7', '寝転がり8'],
+    };
+
+    // 該当ポーズがなければ全カテゴリから選ぶ
+    const candidates =
+      POSE_MAP[pose] ??
+      Object.values(POSE_MAP).flat();
+
+    const name = candidates[Math.floor(Math.random() * candidates.length)];
+    return `/${encodeURIComponent(name)}.png`;
   }
 
   /** 猫アセットが読み込めない場合のフォールバック線画 */
