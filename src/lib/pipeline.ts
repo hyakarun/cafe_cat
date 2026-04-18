@@ -142,21 +142,11 @@ class ShirettoPipeline {
           .map(s => s.label.toLowerCase())
           .filter(l => l !== 'unlabeled');
 
-        // ── 机の広さ（面積）チェック ──
-        const tableSegments = segOutput.filter(s => 
-          s.label.toLowerCase().includes('table') || 
-          s.label.toLowerCase().includes('desk')
-        );
-        const totalTableAreaRatio = tableSegments.reduce((sum, s) => {
-          let count = 0;
-          for (let i = 0; i < s.mask.data.length; i++) {
-            if (s.mask.data[i] > 128) count++;
-          }
-          return sum + (count / s.mask.data.length);
-        }, 0);
-
-        // テーブル面が画像全体の4%未満ならエラー
-        if (totalTableAreaRatio < 0.04) {
+        // ── 猫の居場所（カフェアイテムや机）があるかのチェック ──
+        // ※AIは机の表面を「wood(木)」など別名で判定することが多いため、
+        // コップ・お皿・テーブルなどの「対象物」が1つでもあればOKとする
+        const hasValidTarget = segOutput.some(s => isTargetLabel(s.label));
+        if (!hasValidTarget) {
           throw new Error('NOT_ENOUGH_SPACE');
         }
 
