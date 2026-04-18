@@ -193,16 +193,21 @@ class ShirettoPipeline {
   /* ── 配置計算 ───────────────────────────────────────────── */
 
   private calculatePlacement(segments: SegmentResult[], depthValue: number): PlacementResult {
-    // 前景（下 40% 以下）にあるカフェアイテムを優先
+    // 前景（下 40% 以下）にあるカフェアイテム
     const foregroundTargets = segments.filter(s => {
       if (!isTargetLabel(s.label)) return false;
       const b = this.extractBounds(s.mask);
       return b.maxY > 0.4;
     });
 
-    const target = foregroundTargets[0] ?? segments.find(s => isTargetLabel(s.label));
-    if (!target?.mask) return this.fallbackPlacement();
+    // 候補の中からランダムに1つ選ぶ（毎回同じにならないように）
+    const candidates = foregroundTargets.length > 0 
+      ? foregroundTargets 
+      : segments.filter(s => isTargetLabel(s.label));
 
+    if (candidates.length === 0) return this.fallbackPlacement();
+
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
     const bounds = this.extractBounds(target.mask);
     const behavior = getBehavior(target.label);
     const objW = bounds.maxX - bounds.minX;
@@ -210,11 +215,17 @@ class ShirettoPipeline {
 
     let x: number, y: number;
     if (behavior.anchor === 'rim') {
-      // フチの右側・少し上に出現
-      x = bounds.maxX + 0.015;
-      y = bounds.minY + objH * behavior.offsetY;
+      // ランダムで右側か左側かを気まぐれに決める
+      const isRight = Math.random() > 0.5;
+      x = isRight ? bounds.maxX + 0.015 : bounds.minX - 0.015;
+      
+      // Y軸も少しゆらぎ (+/- 5%) を持たせる
+      const yJitter = (Math.random() - 0.5) * 0.1;
+      y = bounds.minY + objH * (behavior.offsetY + yJitter);
     } else {
-      x = (bounds.minX + bounds.maxX) / 2 + objW * 0.15;
+      // テーブル等のベース配置。中心から少し左右ランダムにズレる
+      const xJitter = (Math.random() - 0.5) * 0.3;
+      x = (bounds.minX + bounds.maxX) / 2 + objW * xJitter;
       y = bounds.maxY;
     }
 
