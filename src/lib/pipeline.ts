@@ -313,15 +313,10 @@ class ShirettoPipeline {
         continue;
       }
 
-      // 猫の位置と重なるセグメントだけを遮蔽マスクに追加
+      // この物体は猫より手前にある（遮蔽物となる）とみなす
       for (let i = 0; i < seg.mask.data.length; i++) {
         if (seg.mask.data[i] > 128) {
-          const sx = i % width;
-          const sy = Math.floor(i / width);
-          const dist = Math.sqrt((sx - px) ** 2 + (sy - py) ** 2);
-          if (dist < radius * 1.2) {
-            merged[i] = 255;
-          }
+          merged[i] = 255;
         }
       }
     }
