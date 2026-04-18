@@ -53,10 +53,16 @@ const App: React.FC = () => {
       setProcessedImage(pipelineResult.imageDataUrl);
       setResult(pipelineResult);
       setScreen('result');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Processing failed:', error);
-      setProcessedImage(image);
-      setScreen('result');
+      if (error.message === 'NOT_ENOUGH_SPACE') {
+        alert('猫がくつろげる平たい机が十分に見つかりませんでした。\nもう少し机が広く写っている写真を選んでください！🐾');
+        setProcessedImage(null);
+        setScreen('preview');
+      } else {
+        setProcessedImage(image);
+        setScreen('result');
+      }
     }
   }, [image]);
 

@@ -142,6 +142,24 @@ class ShirettoPipeline {
           .map(s => s.label.toLowerCase())
           .filter(l => l !== 'unlabeled');
 
+        // ── 机の広さ（面積）チェック ──
+        const tableSegments = segOutput.filter(s => 
+          s.label.toLowerCase().includes('table') || 
+          s.label.toLowerCase().includes('desk')
+        );
+        const totalTableAreaRatio = tableSegments.reduce((sum, s) => {
+          let count = 0;
+          for (let i = 0; i < s.mask.data.length; i++) {
+            if (s.mask.data[i] > 128) count++;
+          }
+          return sum + (count / s.mask.data.length);
+        }, 0);
+
+        // テーブル面が画像全体の4%未満ならエラー
+        if (totalTableAreaRatio < 0.04) {
+          throw new Error('NOT_ENOUGH_SPACE');
+        }
+
         // ── 深度推定で奥行き値を取得 ──
         let depthAtPlacement = 0.5;
         if (this.depthEstimator) {
@@ -170,7 +188,10 @@ class ShirettoPipeline {
 
         // ── 遮蔽マスク：猫の後ろにある物体マスクを収集 ──
         occlusionMask = this.buildOcclusionMask(segOutput, placement);
-      } catch (err) {
+      } catch (err: any) {
+        if (err.message === 'NOT_ENOUGH_SPACE') {
+          throw err; // アプリ側にそのまま伝播させる
+        }
         console.warn('[Pipeline] 推論失敗—フォールバック配置:', err);
         placement = this.fallbackPlacement();
       }
