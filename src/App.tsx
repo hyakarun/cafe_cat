@@ -130,6 +130,7 @@ const App: React.FC = () => {
               <ImageCard
                 image={image!}
                 processedImage={processedImage}
+                debugImage={result?.debugImageDataUrl}
                 isProcessing={false}
                 onReset={handleReset}
                 placement={result?.placement}

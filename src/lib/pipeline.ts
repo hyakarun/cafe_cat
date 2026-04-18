@@ -30,6 +30,7 @@ export interface PlacementResult {
 
 export interface PipelineResult {
   imageDataUrl: string;
+  debugImageDataUrl?: string; // AIの認識範囲を可視化した画像
   placement: PlacementResult;
   detectedLabels: string[];
   modelLoaded: boolean;
@@ -194,7 +195,83 @@ class ShirettoPipeline {
     this.lastCatAsset = catAsset;
 
     const imageDataUrl = await this.composeOverlay(imageSource, placement, occlusionMask, catAsset);
-    return { imageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
+    let debugImageDataUrl = undefined;
+    if (this.lastSegOutput) {
+      debugImageDataUrl = await this.drawDebugMasks(imageSource, this.lastSegOutput);
+    }
+    
+    return { imageDataUrl, debugImageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
+  }
+
+  /** AIのセグメンテーション（認識領域）を可視化する内部メソッド */
+  private drawDebugMasks(source: string, segments: SegmentResult[]): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+
+        const colors = [
+          { r: 255, g: 59, b: 48 },   // Red
+          { r: 52, g: 199, b: 89 },   // Green
+          { r: 0, g: 122, b: 255 },   // Blue
+          { r: 255, g: 204, b: 0 },   // Yellow
+          { r: 175, g: 82, b: 222 },  // Purple
+          { r: 255, g: 149, b: 0 },   // Orange
+        ];
+
+        let colorIdx = 0;
+        for (const seg of segments) {
+          if (seg.label === 'unlabeled') continue;
+          
+          const c = colors[colorIdx % colors.length];
+          colorIdx++;
+
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = seg.mask.width;
+          maskCanvas.height = seg.mask.height;
+          const maskCtx = maskCanvas.getContext('2d')!;
+          const imgData = maskCtx.createImageData(seg.mask.width, seg.mask.height);
+
+          let hasPixels = false;
+          for (let i = 0; i < seg.mask.data.length; i++) {
+            if (seg.mask.data[i] > 128) {
+              imgData.data[i * 4] = c.r;
+              imgData.data[i * 4 + 1] = c.g;
+              imgData.data[i * 4 + 2] = c.b;
+              imgData.data[i * 4 + 3] = 120; // 半透明
+              hasPixels = true;
+            }
+          }
+          if (!hasPixels) continue;
+
+          maskCtx.putImageData(imgData, 0, 0);
+          ctx.drawImage(maskCanvas, 0, 0, img.width, img.height);
+
+          // ラベルテキスト描画
+          const bnds = this.extractBounds(seg.mask);
+          const textX = (bnds.minX + bnds.maxX) / 2 * img.width;
+          const textY = (bnds.minY + bnds.maxY) / 2 * img.height;
+          
+          ctx.font = 'bold 24px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+          ctx.strokeText(seg.label, textX, textY);
+          ctx.fillStyle = 'white';
+          ctx.fillText(seg.label, textX, textY);
+        }
+
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.onerror = () => resolve(source);
+      img.src = source;
+    });
   }
 
   /** 位置調整などでの再合成（AI推論をスキップ） */

@@ -6,6 +6,7 @@ import type { PlacementResult } from '../lib/pipeline';
 interface ImageCardProps {
   image: string;
   processedImage: string | null;
+  debugImage?: string; // AI認識用のデバッグ画像
   isProcessing: boolean;
   onReset: () => void;
   placement?: PlacementResult | null;
@@ -15,12 +16,14 @@ interface ImageCardProps {
 const ImageCard: React.FC<ImageCardProps> = ({
   image,
   processedImage,
+  debugImage,
   isProcessing,
   onReset,
   placement,
   onAdjust,
 }) => {
   const [adjustMode, setAdjustMode] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
   const [localPlacement, setLocalPlacement] = useState<PlacementResult | null>(placement || null);
   const adjustTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -51,7 +54,7 @@ const ImageCard: React.FC<ImageCardProps> = ({
       <div className="listing-card" id="image-card">
         <div className="listing-image-wrapper">
           <img
-            src={processedImage || image}
+            src={showDebug && debugImage ? debugImage : (processedImage || image)}
             alt="処理対象の画像"
             className="listing-image"
           />
@@ -104,6 +107,11 @@ const ImageCard: React.FC<ImageCardProps> = ({
                 {placement && (
                   <button onClick={() => setAdjustMode(true)} className="btn-circle" title="猫の調整" id="btn-adjust">
                     <SlidersHorizontal size={20} />
+                  </button>
+                )}
+                {debugImage && (
+                  <button onClick={() => setShowDebug(!showDebug)} className={`btn-circle ${showDebug ? 'active-debug' : ''}`} title="AIの認識領域を見る" style={{ background: showDebug ? 'var(--bg-secondary)' : '' }}>
+                    <Sparkles size={20} />
                   </button>
                 )}
                 <button className="btn-primary-red" style={{ flex: 1, justifyContent: 'center' }} id="btn-share">
