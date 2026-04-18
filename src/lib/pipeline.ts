@@ -58,6 +58,10 @@ const CAFE_BEHAVIORS: Record<string, {
   // テーブル面など（表面を歩く・寝転がる）
   table:     { position: 'surface', pose: 'walking' },
   desk:      { position: 'surface', pose: 'walking' },
+  wood:      { position: 'surface', pose: 'walking' },
+  counter:   { position: 'surface', pose: 'walking' },
+  floor:     { position: 'surface', pose: 'walking' },
+  label_:    { position: 'surface', pose: 'walking' }, // 背景（ID番号で出力される木目・板など）も面とみなす
 };
 
 function getBehavior(label: string) {
