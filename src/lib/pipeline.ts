@@ -289,17 +289,19 @@ class ShirettoPipeline {
   /* ── 配置計算 ───────────────────────────────────────────── */
 
   private calculatePlacement(segments: SegmentResult[], depthValue: number): PlacementResult {
-    // 前景（下 40% 以下）にあるカフェアイテム
-    const foregroundTargets = segments.filter(s => {
+    // 前景（下 40% 以下）にある表面（テーブルやデスク）だけを候補にする
+    const surfaceTargets = segments.filter(s => {
       if (!isTargetLabel(s.label)) return false;
+      const behavior = getBehavior(s.label);
+      if (behavior.position !== 'surface') return false;
+      
       const b = this.extractBounds(s.mask);
       return b.maxY > 0.4;
     });
 
-    // 候補の中からランダムに1つ選ぶ（毎回同じにならないように）
-    const candidates = foregroundTargets.length > 0 
-      ? foregroundTargets 
-      : segments.filter(s => isTargetLabel(s.label));
+    const candidates = surfaceTargets.length > 0 
+      ? surfaceTargets 
+      : segments.filter(s => isTargetLabel(s.label) && getBehavior(s.label).position === 'surface');
 
     if (candidates.length === 0) return this.fallbackPlacement();
 
