@@ -401,7 +401,11 @@ class ShirettoPipeline {
 
         cat.onload = () => {
           catCtx.save();
-          catCtx.globalCompositeOperation = 'screen'; // 白線画を自然に合成
+          
+          // 白い線画が明るい背景でも見えるように、黒いドロップシャドウをかける
+          catCtx.filter = 'drop-shadow(0px 2px 5px rgba(0, 0, 0, 0.45))';
+          catCtx.globalCompositeOperation = 'source-over';
+          
           catCtx.translate(px, py);
           catCtx.rotate((placement.rotation * Math.PI) / 180);
           catCtx.drawImage(cat, -size / 2, -size / 2, size, size);
