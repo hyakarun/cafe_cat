@@ -70,6 +70,11 @@ class ShirettoPipeline {
   private initPromise: Promise<void> | null = null;
   private modelReady = false;
 
+  // キャッシュ（再合成用）
+  private lastImageSource: string | null = null;
+  private lastSegOutput: SegmentResult[] | null = null;
+  private lastCatAsset: string | null = null;
+
   async init(): Promise<void> {
     if (this.modelReady) return;
     if (this.initPromise) return this.initPromise;
@@ -119,9 +124,13 @@ class ShirettoPipeline {
     let detectedLabels: string[] = [];
     let occlusionMask: { width: number; height: number; data: Uint8Array } | null = null;
 
+    this.lastImageSource = imageSource;
+    this.lastSegOutput = null; // リセット
+
     if (this.modelReady && this.segmenter) {
       try {
         const segOutput = await this.segmenter(imageSource) as SegmentResult[];
+        this.lastSegOutput = segOutput;
         detectedLabels = segOutput
           .map(s => s.label.toLowerCase())
           .filter(l => l !== 'unlabeled');
@@ -162,9 +171,24 @@ class ShirettoPipeline {
       placement = this.fallbackPlacement();
     }
 
-    const imageDataUrl = await this.composeOverlay(imageSource, placement, occlusionMask);
+    const catAsset = this.pickCatAsset(placement.pose);
+    this.lastCatAsset = catAsset;
+
+    const imageDataUrl = await this.composeOverlay(imageSource, placement, occlusionMask, catAsset);
     return { imageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
   }
+
+  /** 位置調整などでの再合成（AI推論をスキップ） */
+  async recompose(newPlacement: PlacementResult): Promise<string | null> {
+    if (!this.lastImageSource || !this.lastCatAsset) return null;
+    
+    let occlusionMask = null;
+    if (this.lastSegOutput) {
+      occlusionMask = this.buildOcclusionMask(this.lastSegOutput, newPlacement);
+    }
+    return this.composeOverlay(this.lastImageSource, newPlacement, occlusionMask, this.lastCatAsset);
+  }
+
 
   /* ── 配置計算 ───────────────────────────────────────────── */
 
@@ -296,6 +320,7 @@ class ShirettoPipeline {
     source: string,
     placement: PlacementResult,
     occlusionMask: { width: number; height: number; data: Uint8Array } | null,
+    catAssetUrl: string
   ): Promise<string> {
     return new Promise((resolve) => {
       const photo = new Image();
@@ -325,7 +350,7 @@ class ShirettoPipeline {
 
         const cat = new Image();
         cat.crossOrigin = 'anonymous';
-        cat.src = this.pickCatAsset(placement.pose); // ポーズ別に選択
+        cat.src = catAssetUrl;
 
         cat.onload = () => {
           catCtx.save();

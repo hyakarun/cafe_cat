@@ -352,6 +352,36 @@ h1, h2, h3, h4, h5, h6 {
   transform: scale(0.94);
 }
 
+/* ========================================
+   Adjust Panel (Positioning)
+   ======================================== */
+.adjust-panel {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.slider-row label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
 .processed-element {
   position: absolute;
   z-index: 10;

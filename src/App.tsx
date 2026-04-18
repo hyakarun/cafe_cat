@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { pipelineInstance } from './lib/pipeline';
-import type { PipelineResult } from './lib/pipeline';
+import type { PipelineResult, PlacementResult } from './lib/pipeline';
 import Navbar from './components/Navbar';
 import HeroSection from './components/HeroSection';
 import ImageCard from './components/ImageCard';
@@ -68,6 +68,15 @@ const App: React.FC = () => {
     setScreen('landing');
   }, []);
 
+  /* ── 位置調整 ── */
+  const handleAdjust = useCallback(async (newPlacement: PlacementResult) => {
+    const newImage = await pipelineInstance.recompose(newPlacement);
+    if (newImage) {
+      setProcessedImage(newImage);
+      setResult(prev => prev ? { ...prev, placement: newPlacement, imageDataUrl: newImage } : null);
+    }
+  }, []);
+
   return (
     <div className="airbnb-container">
       <Navbar />
@@ -117,6 +126,8 @@ const App: React.FC = () => {
                 processedImage={processedImage}
                 isProcessing={false}
                 onReset={handleReset}
+                placement={result?.placement}
+                onAdjust={handleAdjust}
               />
               {result && (
                 <DebugPanel
