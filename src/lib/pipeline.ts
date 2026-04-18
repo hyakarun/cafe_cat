@@ -84,7 +84,7 @@ class ShirettoPipeline {
   // キャッシュ（再合成用）
   private lastImageSource: string | null = null;
   private lastDetectOutput: DetectResult[] | null = null;
-  private lastDepthOutput: { width: number; height: number; data: Float32Array } | null = null;
+  private lastDepthOutput: { width: number; height: number; channels: number; data: any } | null = null;
   private lastCatAsset: string | null = null;
 
   async init(): Promise<void> {
@@ -181,9 +181,10 @@ class ShirettoPipeline {
             const depthResult = await this.depthEstimator(imageSource);
             const depthTensor = (depthResult as any)?.depth;
             if (depthTensor?.data) {
-              const dw = depthTensor.dims ? depthTensor.dims[2] || depthTensor.width : 518;
-              const dh = depthTensor.dims ? depthTensor.dims[1] || depthTensor.height : 518;
-              this.lastDepthOutput = { width: dw, height: dh, data: depthTensor.data as Float32Array };
+              const dw = depthTensor.width || 518;
+              const dh = depthTensor.height || 518;
+              const channels = depthTensor.channels || 1;
+              this.lastDepthOutput = { width: dw, height: dh, channels, data: depthTensor.data };
             }
           } catch (e) {
             console.warn('[Pipeline] 深度推定スキップ:', e);
@@ -194,9 +195,7 @@ class ShirettoPipeline {
 
         if (this.lastDepthOutput) {
           depthAtPlacement = this.sampleDepthAtBounds(
-            this.lastDepthOutput.data,
-            this.lastDepthOutput.width,
-            this.lastDepthOutput.height,
+            this.lastDepthOutput,
             placement
           );
           placement.depthValue = depthAtPlacement;
@@ -234,9 +233,7 @@ class ShirettoPipeline {
     let occlusionMask = null;
     if (this.lastDepthOutput) {
       newPlacement.depthValue = this.sampleDepthAtBounds(
-        this.lastDepthOutput.data,
-        this.lastDepthOutput.width,
-        this.lastDepthOutput.height,
+        this.lastDepthOutput,
         newPlacement
       );
       occlusionMask = this.buildDepthOcclusionMask(this.lastDepthOutput, newPlacement);
@@ -374,40 +371,38 @@ class ShirettoPipeline {
   }
 
   private sampleDepthAtBounds(
-    depthData: Float32Array,
-    w: number,
-    h: number,
+    depthResult: { width: number; height: number; channels: number; data: any },
     placement: PlacementResult
   ): number {
-    const cx = Math.floor(placement.x * w);
-    const cy = Math.floor(placement.y * h);
-    const idx = cy * w + cx;
-    const raw = depthData[Math.max(0, Math.min(idx, depthData.length - 1))] ?? 128;
-    // Xenova depth maps: 255 = nearest, 0 = farthest
+    const { width: w, height: h, channels, data } = depthResult;
+    const cx = Math.max(0, Math.min(w - 1, Math.floor(placement.x * w)));
+    const cy = Math.max(0, Math.min(h - 1, Math.floor(placement.y * h)));
+    const idx = (cy * w + cx) * channels;
+    const raw = data[Math.max(0, Math.min(idx, data.length - 1))] ?? 128;
     return Math.max(0, Math.min(1, raw / 255.0));
   }
 
   private buildDepthOcclusionMask(
-    depthResult: { width: number; height: number; data: Float32Array },
+    depthResult: { width: number; height: number; channels: number; data: any },
     placement: PlacementResult,
   ): { width: number; height: number; data: Uint8Array } | null {
-    const { width, height, data } = depthResult;
+    const { width, height, channels, data } = depthResult;
     const merged = new Uint8Array(width * height);
 
-    // 猫の足元の座標
-    const px = Math.floor(placement.x * width);
-    const py = Math.floor(placement.y * height);
-    if (py < 0 || py >= height || px < 0 || px >= width) return null;
+    const px = Math.max(0, Math.min(width - 1, Math.floor(placement.x * width)));
+    const py = Math.max(0, Math.min(height - 1, Math.floor(placement.y * height)));
+    const baseIdx = (py * width + px) * channels;
+    const baseDepthValue = data[baseIdx];
 
-    const baseDepthValue = data[py * width + px];
+    const DEPTH_THRESHOLD = 5;
 
-    // 足元よりも一定以上「手前（深度値が大きい）」ピクセルを遮蔽として扱う
-    // ※255に近づくほど手前。
-    const DEPTH_THRESHOLD = 5; // わずかでも手前なら隠す
-
-    for (let i = 0; i < data.length; i++) {
-      if (data[i] > baseDepthValue + DEPTH_THRESHOLD) {
-        merged[i] = 255;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        const dIdx = i * channels;
+        if (data[dIdx] > baseDepthValue + DEPTH_THRESHOLD) {
+          merged[i] = 255;
+        }
       }
     }
 
