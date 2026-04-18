@@ -321,10 +321,40 @@ class ShirettoPipeline {
       const yJitter = (Math.random() - 0.5) * 0.15;
       y = (bounds.ymin + bounds.ymax) / 2 + objH * yJitter;
     } else {
-      const xJitter = (Math.random() - 0.5) * 0.4;
-      const yJitter = (Math.random() - 0.5) * 0.4;
-      x = (bounds.xmin + bounds.xmax) / 2 + objW * xJitter;
-      y = (bounds.ymin + bounds.ymax) / 2 + objH * yJitter;
+      // テーブルなど平面の上（枠内）に配置する。ただし他の物体（コップや皿など）のボックスを避ける
+      const obstacles = segments.filter(s => getBehavior(s.label).position !== 'surface');
+      let found = false;
+      
+      // 最大50回ランダムな座標を試し、空いている場所を探す
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const testX = bounds.xmin + Math.random() * objW;
+        const testY = bounds.ymin + Math.random() * objH;
+        
+        // 他の物体のボックスに被っていないかチェック（猫の体サイズ分のマージンを取る）
+        const hit = obstacles.some(obs => {
+           const marginX = 0.04;
+           const marginY = 0.04;
+           return (
+             testX > obs.box.xmin - marginX && 
+             testX < obs.box.xmax + marginX &&
+             testY > obs.box.ymin - marginY &&
+             testY < obs.box.ymax + marginY
+           );
+        });
+
+        if (!hit) {
+          x = testX;
+          y = testY;
+          found = true;
+          break;
+        }
+      }
+
+      // もし50回試してダメなら、元のランダム中央ロジックにフォールバック
+      if (!found) {
+        x = (bounds.xmin + bounds.xmax) / 2 + objW * (Math.random() - 0.5) * 0.4;
+        y = (bounds.ymin + bounds.ymax) / 2 + objH * (Math.random() - 0.5) * 0.4;
+      }
     }
 
     x = Math.max(0.05, Math.min(0.90, x));
