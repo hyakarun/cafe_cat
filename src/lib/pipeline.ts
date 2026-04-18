@@ -304,12 +304,16 @@ class ShirettoPipeline {
       if (!isTargetLabel(seg.label)) continue;
       
       const behavior = getBehavior(seg.label);
-      // テーブルなどは猫を遮蔽しない
-      if (behavior.position === 'surface') continue;
+      
+      // 猫を隠す（遮蔽する）ことができるのは、高さのある物体（コップや瓶など）のみとする
+      if (behavior.position !== 'behind') {
+        continue;
+      }
 
-      // もし自分を配置した基準オブジェクトであり、かつ「beside」なら遮蔽しない
-      // （皿の横にいるのに皿で削られるのを防ぐため）
-      if (seg.label === placement.targetLabel && behavior.position === 'beside') {
+      const b = this.extractBounds(seg.mask);
+      // 物体の下端（maxY）が猫の足元（placement.y）より上にしかない場合、
+      // 物理的に「猫よりも奥にある」ため、手前にいる猫を隠すことはできない
+      if (b.maxY < placement.y) {
         continue;
       }
 
