@@ -25,6 +25,7 @@ export interface PlacementResult {
   depthValue: number;  // 0=手前, 1=奥（遠近感スケール補正用）
   pose: 'peeking' | 'standing' | 'walking';
   reason: string;
+  targetLabel?: string; // 猫が基準とした対象物のラベル
 }
 
 export interface PipelineResult {
@@ -265,7 +266,8 @@ class ShirettoPipeline {
       rotation: (Math.random() - 0.5) * 8,
       depthValue,
       pose: behavior.pose,
-      reason: `${target.label} を検出。depth=${depthValue.toFixed(2)}、scale=${scale.toFixed(3)}`,
+      reason: `${target.label} を基準に配置`,
+      targetLabel: target.label,
     };
   }
 
@@ -300,6 +302,17 @@ class ShirettoPipeline {
 
     for (const seg of segments) {
       if (!isTargetLabel(seg.label)) continue;
+      
+      const behavior = getBehavior(seg.label);
+      // テーブルなどは猫を遮蔽しない
+      if (behavior.position === 'surface') continue;
+
+      // もし自分を配置した基準オブジェクトであり、かつ「beside」なら遮蔽しない
+      // （皿の横にいるのに皿で削られるのを防ぐため）
+      if (seg.label === placement.targetLabel && behavior.position === 'beside') {
+        continue;
+      }
+
       // 猫の位置と重なるセグメントだけを遮蔽マスクに追加
       for (let i = 0; i < seg.mask.data.length; i++) {
         if (seg.mask.data[i] > 128) {
