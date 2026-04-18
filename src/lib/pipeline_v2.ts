@@ -56,10 +56,12 @@ const CAFE_BEHAVIORS: Record<string, {
   knife:     { position: 'beside',  pose: 'standing' },
   
   // テーブル面など（表面を歩く・寝転がる）
-  "dining table": { position: 'surface', pose: 'walking' },
-  bed:       { position: 'surface', pose: 'walking' },
-  couch:     { position: 'surface', pose: 'walking' },
-  chair:     { position: 'surface', pose: 'walking' },
+  table:     { position: 'surface', pose: 'walking' },
+  desk:      { position: 'surface', pose: 'walking' },
+  wood:      { position: 'surface', pose: 'walking' },
+  counter:   { position: 'surface', pose: 'walking' },
+  floor:     { position: 'surface', pose: 'walking' },
+  label_:    { position: 'surface', pose: 'walking' }, // 背景（ID番号で出力される木目・板など）も面とみなす
 };
 
 function getBehavior(label: string) {
@@ -83,8 +85,7 @@ class ShirettoPipeline {
 
   // キャッシュ（再合成用）
   private lastImageSource: string | null = null;
-  private lastDetectOutput: DetectResult[] | null = null;
-  private lastDepthOutput: { width: number; height: number; data: Float32Array } | null = null;
+  private lastSegOutput: DetectResult[] | null = null;
   private lastCatAsset: string | null = null;
 
   async init(): Promise<void> {
@@ -102,7 +103,7 @@ class ShirettoPipeline {
 
       console.log('[Pipeline] モデル読み込み開始...');
 
-      // 物体検出（Object Detection）— 軽量・高速・高精度
+      // セグメンテーション — v4 で動作確認済みモデル
       this.detector = await pipeline(
         'object-detection',
         'Xenova/detr-resnet-50',
@@ -134,80 +135,66 @@ class ShirettoPipeline {
 
     let placement: PlacementResult;
     let detectedLabels: string[] = [];
-    let occlusionMask: { width: number; height: number; data: Uint8Array } | null = null;
+    let depthMapData: any = null;
+    let imgW = 800, imgH = 800;
 
     this.lastImageSource = imageSource;
     this.lastDetectOutput = null; // リセット
-    this.lastDepthOutput = null;
 
-    // 元画像のサイズを取得（正規化座標に変換するため）
-    const imgInfo = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image(); i.crossOrigin = 'anonymous'; 
-      i.onload = () => resolve(i); i.onerror = reject; i.src = imageSource;
-    }).catch(() => ({ width: 800, height: 600 }));
-    const imgW = imgInfo.width;
-    const imgH = imgInfo.height;
+    
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => resolve(i); i.onerror = reject; i.src = imageSource;
+    });
+    imgW = img.width; imgH = img.height;
 
     if (this.modelReady && this.detector) {
       try {
-        const detOutput = await this.detector(imageSource) as DetectResult[];
-        
-        // bounding boxの座標を0-1に正規化
-        const normalizedOutput = detOutput.map(d => ({
-          label: d.label,
-          score: d.score,
-          box: {
-            xmin: d.box.xmin / imgW,
-            xmax: d.box.xmax / imgW,
-            ymin: d.box.ymin / imgH,
-            ymax: d.box.ymax / imgH
-          }
-        }));
-        
-        this.lastDetectOutput = normalizedOutput;
-        detectedLabels = normalizedOutput
-          .map(s => s.label.toLowerCase())
-          .sort((a,b) => a.localeCompare(b)); // Sort just for uniqueness if needed, keeping simple
+        const segOutput = await this.detector(imageSource) as DetectResult[];
 
-        const hasValidTarget = normalizedOutput.some(s => isTargetLabel(s.label));
+        this.lastDetectOutput = segOutput;
+        detectedLabels = segOutput
+          .map(s => s.label.toLowerCase())
+          .filter(l => l !== 'unlabeled');
+
+        // ── 猫の居場所（カフェアイテムや机）があるかのチェック ──
+        // ※AIは机の表面を「wood(木)」など別名で判定することが多いため、
+        // コップ・お皿・テーブルなどの「対象物」が1つでもあればOKとする
+        const hasValidTarget = segOutput.some(s => isTargetLabel(s.label));
         if (!hasValidTarget) {
           throw new Error('NOT_ENOUGH_SPACE');
         }
 
-        // ── 深度推定で奥行きマップ全体を取得 ──
+        // ── 深度推定で奥行き値を取得 ──
         let depthAtPlacement = 0.5;
         if (this.depthEstimator) {
           try {
+            // @ts-ignore HF Transformers v3 の型が不安定なため
             const depthResult = await this.depthEstimator(imageSource);
-            const depthTensor = (depthResult as any)?.depth;
-            if (depthTensor?.data) {
-              const dw = depthTensor.dims ? depthTensor.dims[2] || depthTensor.width : 518;
-              const dh = depthTensor.dims ? depthTensor.dims[1] || depthTensor.height : 518;
-              this.lastDepthOutput = { width: dw, height: dh, data: depthTensor.data as Float32Array };
+            const depthMap = (depthResult as any)?.depth?.data as Float32Array | undefined;
+            if (depthMap) {
+              // ターゲット物体の中心付近の深度値を取得
+              const target = segOutput.find(s => isTargetLabel(s.label));
+              if (target) {
+                depthAtPlacement = this.sampleDepthAtBounds(
+                  depthMap,
+                  target.mask.width,
+                  target.mask.height,
+                  this.extractBounds(target.mask),
+                );
+              }
             }
           } catch (e) {
             console.warn('[Pipeline] 深度推定スキップ:', e);
           }
         }
 
-        placement = this.calculatePlacement(normalizedOutput);
+        placement = this.calculatePlacement(segOutput, depthAtPlacement);
 
-        if (this.lastDepthOutput) {
-          depthAtPlacement = this.sampleDepthAtBounds(
-            this.lastDepthOutput.data,
-            this.lastDepthOutput.width,
-            this.lastDepthOutput.height,
-            placement
-          );
-          placement.depthValue = depthAtPlacement;
-          
-          // ── 遮蔽マスク：深度マップを使って猫の後ろにある物体を隠すマスクの生成 ──
-          occlusionMask = this.buildDepthOcclusionMask(this.lastDepthOutput, placement);
-        }
-
+        // ── 遮蔽マスク：猫の後ろにある物体マスクを収集 ──
+        occlusionMask = this.buildOcclusionMask(segOutput, placement);
       } catch (err: any) {
         if (err.message === 'NOT_ENOUGH_SPACE') {
-          throw err;
+          throw err; // アプリ側にそのまま伝播させる
         }
         console.warn('[Pipeline] 推論失敗—フォールバック配置:', err);
         placement = this.fallbackPlacement();
@@ -222,29 +209,14 @@ class ShirettoPipeline {
     const imageDataUrl = await this.composeOverlay(imageSource, placement, occlusionMask, catAsset);
     let debugImageDataUrl = undefined;
     if (this.lastDetectOutput) {
-      debugImageDataUrl = await this.drawDebugMasks(imageSource, this.lastDetectOutput, imgW, imgH);
+      debugImageDataUrl = await this.drawDebugMasks(imageSource, this.lastDetectOutput);
     }
     
     return { imageDataUrl, debugImageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
   }
 
-  async recompose(newPlacement: PlacementResult): Promise<string | null> {
-    if (!this.lastImageSource || !this.lastCatAsset) return null;
-    
-    let occlusionMask = null;
-    if (this.lastDepthOutput) {
-      newPlacement.depthValue = this.sampleDepthAtBounds(
-        this.lastDepthOutput.data,
-        this.lastDepthOutput.width,
-        this.lastDepthOutput.height,
-        newPlacement
-      );
-      occlusionMask = this.buildDepthOcclusionMask(this.lastDepthOutput, newPlacement);
-    }
-    return this.composeOverlay(this.lastImageSource, newPlacement, occlusionMask, this.lastCatAsset);
-  }
-
-  private drawDebugMasks(source: string, segments: DetectResult[], imgW: number, imgH: number): Promise<string> {
+  /** AIのセグメンテーション（認識領域）を可視化する内部メソッド */
+  private drawDebugMasks(source: string, segments: DetectResult[]): Promise<string> {
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -255,30 +227,56 @@ class ShirettoPipeline {
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0);
 
+        const colors = [
+          { r: 255, g: 59, b: 48 },   // Red
+          { r: 52, g: 199, b: 89 },   // Green
+          { r: 0, g: 122, b: 255 },   // Blue
+          { r: 255, g: 204, b: 0 },   // Yellow
+          { r: 175, g: 82, b: 222 },  // Purple
+          { r: 255, g: 149, b: 0 },   // Orange
+        ];
+
+        let colorIdx = 0;
         for (const seg of segments) {
           if (seg.label === 'unlabeled') continue;
           
-          const bx = seg.box.xmin * img.width;
-          const by = seg.box.ymin * img.height;
-          const bw = (seg.box.xmax - seg.box.xmin) * img.width;
-          const bh = (seg.box.ymax - seg.box.ymin) * img.height;
+          const c = colors[colorIdx % colors.length];
+          colorIdx++;
 
-          const textX = bx + bw / 2;
-          const textY = by + bh / 2;
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = seg.mask.width;
+          maskCanvas.height = seg.mask.height;
+          const maskCtx = maskCanvas.getContext('2d')!;
+          const imgData = maskCtx.createImageData(seg.mask.width, seg.mask.height);
+
+          let hasPixels = false;
+          for (let i = 0; i < seg.mask.data.length; i++) {
+            if (seg.mask.data[i] > 128) {
+              imgData.data[i * 4] = c.r;
+              imgData.data[i * 4 + 1] = c.g;
+              imgData.data[i * 4 + 2] = c.b;
+              imgData.data[i * 4 + 3] = 120; // 半透明
+              hasPixels = true;
+            }
+          }
+          if (!hasPixels) continue;
+
+          maskCtx.putImageData(imgData, 0, 0);
+          ctx.drawImage(maskCanvas, 0, 0, img.width, img.height);
+
+          // ラベルテキスト描画
+          const bnds = this.extractBounds(seg.mask);
+          const textX = (bnds.minX + bnds.maxX) / 2 * img.width;
+          const textY = (bnds.minY + bnds.maxY) / 2 * img.height;
           
-          ctx.strokeStyle = isTargetLabel(seg.label) ? 'rgba(52, 199, 89, 0.8)' : 'rgba(255, 59, 48, 0.5)';
-          ctx.lineWidth = 4;
-          ctx.strokeRect(bx, by, bw, bh);
-
           ctx.font = 'bold 24px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.lineWidth = 4;
           ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-          const text = `${seg.label} (${Math.round(seg.score * 100)}%)`;
-          ctx.strokeText(text, textX, textY);
+          ctx.strokeText(seg.label, textX, textY);
           ctx.fillStyle = 'white';
-          ctx.fillText(text, textX, textY);
+          ctx.fillText(seg.label, textX, textY);
         }
 
         resolve(canvas.toDataURL('image/jpeg', 0.8));
@@ -288,13 +286,28 @@ class ShirettoPipeline {
     });
   }
 
-  private calculatePlacement(segments: DetectResult[]): PlacementResult {
-    // 前景（下 40% 以下）にある表面（テーブルやデスク）だけを候補にする
+  /** 位置調整などでの再合成（AI推論をスキップ） */
+  async recompose(newPlacement: PlacementResult): Promise<string | null> {
+    if (!this.lastImageSource || !this.lastCatAsset) return null;
+    
+    let occlusionMask = null;
+    if (this.lastDetectOutput) {
+      occlusionMask = this.buildOcclusionMask(this.lastDetectOutput, newPlacement);
+    }
+    return this.composeOverlay(this.lastImageSource, newPlacement, occlusionMask, this.lastCatAsset);
+  }
+
+
+  /* ── 配置計算 ───────────────────────────────────────────── */
+
+  private calculatePlacement(segments: DetectResult[], depthValue: number, imgW: number, imgH: number): PlacementResult {
     const surfaceTargets = segments.filter(s => {
       if (!isTargetLabel(s.label)) return false;
       const behavior = getBehavior(s.label);
       if (behavior.position !== 'surface') return false;
-      return s.box.ymax > 0.4;
+      
+      const b = this.extractBounds(s.box, imgW, imgH);
+      return b.maxY > 0.4;
     });
 
     const candidates = surfaceTargets.length > 0 
@@ -304,92 +317,118 @@ class ShirettoPipeline {
     if (candidates.length === 0) return this.fallbackPlacement();
 
     const target = candidates[Math.floor(Math.random() * candidates.length)];
-    const bounds = target.box;
+    const bounds = this.extractBounds(target.box, imgW, imgH);
     const behavior = getBehavior(target.label);
-    const objW = bounds.xmax - bounds.xmin;
-    const objH = bounds.ymax - bounds.ymin;
+    const objW = bounds.maxX - bounds.minX;
+    const objH = bounds.maxY - bounds.minY;
 
     let x: number, y: number;
     if (behavior.position === 'behind') {
       const isRight = Math.random() > 0.5;
-      x = isRight ? bounds.xmax + 0.015 : bounds.xmin - 0.015;
-      const yJitter = (Math.random() - 0.5) * 0.1;
-      y = bounds.ymin + objH * (0.15 + yJitter);
+      x = isRight ? bounds.maxX + 0.015 : bounds.minX - 0.015;
+      y = bounds.minY + objH * (0.15 + (Math.random() - 0.5) * 0.1);
     } else if (behavior.position === 'beside') {
       const isRight = Math.random() > 0.5;
-      x = isRight ? bounds.xmax + 0.05 : bounds.xmin - 0.05; 
-      const yJitter = (Math.random() - 0.5) * 0.15;
-      y = (bounds.ymin + bounds.ymax) / 2 + objH * yJitter;
+      x = isRight ? bounds.maxX + 0.05 : bounds.minX - 0.05;
+      y = (bounds.minY + bounds.maxY) / 2 + objH * (Math.random() - 0.5) * 0.15;
     } else {
-      const xJitter = (Math.random() - 0.5) * 0.4;
-      const yJitter = (Math.random() - 0.5) * 0.4;
-      x = (bounds.xmin + bounds.xmax) / 2 + objW * xJitter;
-      y = (bounds.ymin + bounds.ymax) / 2 + objH * yJitter;
+      x = (bounds.minX + bounds.maxX) / 2 + objW * (Math.random() - 0.5) * 0.4;
+      y = (bounds.minY + bounds.maxY) / 2 + objH * (Math.random() - 0.5) * 0.4;
     }
 
     x = Math.max(0.05, Math.min(0.90, x));
     y = Math.max(0.05, Math.min(0.92, y));
 
+    const depthScale = 1.0 - depthValue * 0.45;
     const baseScale = Math.max(0.08, Math.min(0.22, objW * 0.65));
-    const scale = baseScale; // Depth scale will be applied later when we sample depth directly
+    const scale = baseScale * depthScale;
 
     return {
       x, y, scale,
       rotation: (Math.random() - 0.5) * 8,
-      depthValue: 0.5,
+      depthValue,
       pose: behavior.pose,
       reason: `${target.label} を基準に配置`,
       targetLabel: target.label,
     };
   }
 
+  /** 配置場所の深度値をサンプリング */
   private sampleDepthAtBounds(
-    depthData: Float32Array,
+    depthMap: Float32Array,
     w: number,
     h: number,
-    placement: PlacementResult
+    bounds: { minX: number; maxX: number; minY: number; maxY: number },
   ): number {
-    const cx = Math.floor(placement.x * w);
-    const cy = Math.floor(placement.y * h);
+    const cx = Math.floor(((bounds.minX + bounds.maxX) / 2) * w);
+    const cy = Math.floor(((bounds.minY + bounds.maxY) / 2) * h);
     const idx = cy * w + cx;
-    const raw = depthData[Math.max(0, Math.min(idx, depthData.length - 1))] ?? 128;
-    // Xenova depth maps: 255 = nearest, 0 = farthest
-    return Math.max(0, Math.min(1, raw / 255.0));
+    const raw = depthMap[Math.min(idx, depthMap.length - 1)] ?? 0.5;
+    return Math.max(0, Math.min(1, raw));
   }
 
-  private buildDepthOcclusionMask(
-    depthResult: { width: number; height: number; data: Float32Array },
+  /** 遮蔽マスク：猫の座標に重なる物体マスクを統合 */
+  private buildOcclusionMask(
+    segments: DetectResult[],
     placement: PlacementResult,
   ): { width: number; height: number; data: Uint8Array } | null {
-    const { width, height, data } = depthResult;
-    const merged = new Uint8Array(width * height);
+    if (!segments.length) return null;
+    const { width, height, data } = segments[0].mask;
 
-    // 猫の足元の座標
+    // 配置座標に対応するピクセル位置
     const px = Math.floor(placement.x * width);
     const py = Math.floor(placement.y * height);
-    if (py < 0 || py >= height || px < 0 || px >= width) return null;
+    const radius = Math.floor(placement.scale * width * 0.5);
 
-    const baseDepthValue = data[py * width + px];
+    const merged = new Uint8Array(width * height);
 
-    // 足元よりも一定以上「手前（深度値が大きい）」ピクセルを遮蔽として扱う
-    // ※255に近づくほど手前。
-    const DEPTH_THRESHOLD = 5; // わずかでも手前なら隠す
+    for (const seg of segments) {
+      if (!isTargetLabel(seg.label)) continue;
+      
+      const behavior = getBehavior(seg.label);
+      
+      // 猫を隠す（遮蔽する）ことができるのは、高さのある物体（コップや瓶など）のみとする
+      if (behavior.position !== 'behind') {
+        continue;
+      }
 
-    for (let i = 0; i < data.length; i++) {
-      if (data[i] > baseDepthValue + DEPTH_THRESHOLD) {
-        merged[i] = 255;
+      const b = this.extractBounds(seg.mask);
+      // 物体の下端（maxY）が猫の足元（placement.y）より上にしかない場合、
+      // 物理的に「猫よりも奥にある」ため、手前にいる猫を隠すことはできない
+      if (b.maxY < placement.y) {
+        continue;
+      }
+
+      // この物体は猫より手前にある（遮蔽物となる）とみなす
+      for (let i = 0; i < seg.mask.data.length; i++) {
+        if (seg.mask.data[i] > 128) {
+          merged[i] = 255;
+        }
       }
     }
 
     return { width, height, data: merged };
   }
 
+  /** フォールバック配置 */
   private fallbackPlacement(): PlacementResult {
     return {
       x: 0.62, y: 0.52, scale: 0.15,
       rotation: -5, depthValue: 0.5,
       pose: 'peeking',
       reason: 'フォールバック配置（AI未使用）',
+    };
+  }
+
+  /* ── バウンディングボックス抽出 ─────────────────────────── */
+
+  
+  private extractBounds(box: { xmin: number, ymin: number, xmax: number, ymax: number }, imgW: number, imgH: number) {
+    return {
+      minX: box.xmin / imgW,
+      maxX: box.xmax / imgW,
+      minY: box.ymin / imgH,
+      maxY: box.ymax / imgH
     };
   }
 
