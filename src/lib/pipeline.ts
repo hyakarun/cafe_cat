@@ -37,24 +37,31 @@ export interface PipelineResult {
 /* ─── カフェアイテム別ふるまい ──────────────────────────────── */
 
 const CAFE_BEHAVIORS: Record<string, {
-  anchor: 'rim' | 'base';
+  position: 'behind' | 'beside' | 'surface';
   pose: PlacementResult['pose'];
-  offsetY: number;
 }> = {
-  cup:    { anchor: 'rim',  pose: 'peeking',  offsetY: 0.10 },
-  mug:    { anchor: 'rim',  pose: 'peeking',  offsetY: 0.10 },
-  glass:  { anchor: 'rim',  pose: 'peeking',  offsetY: 0.05 },
-  bottle: { anchor: 'rim',  pose: 'peeking',  offsetY: 0.15 },
-  bowl:   { anchor: 'rim',  pose: 'peeking',  offsetY: 0.10 },
-  plate:  { anchor: 'rim',  pose: 'standing', offsetY: 0.00 },
-  table:  { anchor: 'base', pose: 'walking',  offsetY: 0.00 },
-  desk:   { anchor: 'base', pose: 'walking',  offsetY: 0.00 },
+  // 高めの物体（後ろから覗き込む）
+  cup:       { position: 'behind',  pose: 'peeking' },
+  mug:       { position: 'behind',  pose: 'peeking' },
+  glass:     { position: 'behind',  pose: 'peeking' },
+  bottle:    { position: 'behind',  pose: 'peeking' },
+  bowl:      { position: 'behind',  pose: 'peeking' },
+  
+  // 平たい物体（横に立つ・座る）
+  plate:     { position: 'beside',  pose: 'standing' },
+  spoon:     { position: 'beside',  pose: 'standing' },
+  fork:      { position: 'beside',  pose: 'standing' },
+  knife:     { position: 'beside',  pose: 'standing' },
+  
+  // テーブル面など（表面を歩く・寝転がる）
+  table:     { position: 'surface', pose: 'walking' },
+  desk:      { position: 'surface', pose: 'walking' },
 };
 
 function getBehavior(label: string) {
   const lower = label.toLowerCase();
   const match = Object.entries(CAFE_BEHAVIORS).find(([k]) => lower.includes(k));
-  return match?.[1] ?? { anchor: 'base' as const, pose: 'walking' as const, offsetY: 0 };
+  return match?.[1] ?? { position: 'surface' as const, pose: 'walking' as const };
 }
 
 function isTargetLabel(label: string): boolean {
@@ -214,19 +221,24 @@ class ShirettoPipeline {
     const objH = bounds.maxY - bounds.minY;
 
     let x: number, y: number;
-    if (behavior.anchor === 'rim') {
-      // ランダムで右側か左側かを気まぐれに決める
+    if (behavior.position === 'behind') {
+      // 背後から覗き込む（物の上端付近）
       const isRight = Math.random() > 0.5;
       x = isRight ? bounds.maxX + 0.015 : bounds.minX - 0.015;
-      
-      // Y軸も少しゆらぎ (+/- 5%) を持たせる
       const yJitter = (Math.random() - 0.5) * 0.1;
-      y = bounds.minY + objH * (behavior.offsetY + yJitter);
+      y = bounds.minY + objH * (0.15 + yJitter);
+    } else if (behavior.position === 'beside') {
+      // 皿などの横（テーブル面）に座らせる
+      const isRight = Math.random() > 0.5;
+      x = isRight ? bounds.maxX + 0.05 : bounds.minX - 0.05; // 枠の少し外
+      const yJitter = (Math.random() - 0.5) * 0.15;
+      y = (bounds.minY + bounds.maxY) / 2 + objH * yJitter; // 縦の中央付近
     } else {
-      // テーブル等のベース配置。中心から少し左右ランダムにズレる
-      const xJitter = (Math.random() - 0.5) * 0.3;
+      // テーブルなど平面の上（枠の中心付近）を歩く
+      const xJitter = (Math.random() - 0.5) * 0.4;
+      const yJitter = (Math.random() - 0.5) * 0.4;
       x = (bounds.minX + bounds.maxX) / 2 + objW * xJitter;
-      y = bounds.maxY;
+      y = (bounds.minY + bounds.maxY) / 2 + objH * yJitter;
     }
 
     x = Math.max(0.05, Math.min(0.90, x));
