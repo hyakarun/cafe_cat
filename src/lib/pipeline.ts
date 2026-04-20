@@ -17,6 +17,8 @@ export interface DetectResult {
   box: { xmin: number; ymin: number; xmax: number; ymax: number };
 }
 
+export type AngleMode = 'side' | 'diagonal';
+
 export interface PlacementResult {
   x: number;           // 0-1 正規化座標
   y: number;
@@ -26,6 +28,7 @@ export interface PlacementResult {
   pose: 'peeking' | 'standing' | 'walking';
   reason: string;
   targetLabel?: string; // 猫が基準とした対象物のラベル
+  angleMode: AngleMode;
 }
 
 export interface PipelineResult {
@@ -79,6 +82,7 @@ class ShirettoPipeline {
   private lastImageSource: string | null = null;
   private lastDetectOutput: DetectResult[] | null = null;
   private lastCatAsset: string | null = null;
+  private lastOcclusionMask: { width: number; height: number; data: Uint8Array } | null = null;
 
   async init(): Promise<void> {
     if (this.modelReady) return;
@@ -231,7 +235,9 @@ class ShirettoPipeline {
       placement = this.fallbackPlacement();
     }
 
-    const catAsset = this.pickCatAsset(placement.pose);
+    this.lastOcclusionMask = occlusionMask;
+
+    const catAsset = this.pickCatAsset(placement.pose, placement.angleMode);
     this.lastCatAsset = catAsset;
 
     const imageDataUrl = await this.composeOverlay(imageSource, placement, occlusionMask, catAsset);
@@ -242,9 +248,18 @@ class ShirettoPipeline {
     
     return { imageDataUrl, debugImageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
   }
-  async recompose(newPlacement: PlacementResult): Promise<string | null> {
+  async recompose(newPlacement: PlacementResult, newAngleMode?: AngleMode): Promise<string | null> {
     if (!this.lastImageSource || !this.lastCatAsset) return null;
-    return this.composeOverlay(this.lastImageSource, newPlacement, null, this.lastCatAsset);
+    let asset = this.lastCatAsset;
+    
+    // アングルモードが変更された場合はアセットを取り直す
+    if (newAngleMode && newAngleMode !== newPlacement.angleMode) {
+      newPlacement.angleMode = newAngleMode;
+      asset = this.pickCatAsset(newPlacement.pose, newAngleMode);
+      this.lastCatAsset = asset;
+    }
+
+    return this.composeOverlay(this.lastImageSource, newPlacement, this.lastOcclusionMask, asset);
   }
 
   private drawDebugMasks(source: string, segments: DetectResult[], imgW: number, imgH: number): Promise<string> {
@@ -376,6 +391,7 @@ class ShirettoPipeline {
       pose: behavior.pose,
       reason: `${target.label} を基準に配置`,
       targetLabel: target.label,
+      angleMode: 'diagonal', // デフォルトは斜めとする。後で調整可
     };
   }
 
@@ -389,6 +405,7 @@ class ShirettoPipeline {
       rotation: -5, depthValue: 0.5,
       pose: 'peeking',
       reason: 'フォールバック配置（AI未使用）',
+      angleMode: 'diagonal',
     };
   }
 
@@ -534,22 +551,30 @@ class ShirettoPipeline {
     catCtx.globalCompositeOperation = 'source-over';
   }
 
-  private pickCatAsset(pose: string): string {
-    const POSE_MAP: Record<string, string[]> = {
-      peeking:  ['座り', '座り2', '座り3', '座り4', '座り5', '座り6', '座り7', '座り8'],
-      standing: ['佇む', '佇む2', '佇む3', '佇む4', '佇む5'],
-      lying:    ['寝転がり', '寝転がり2', '寝転がり3', '寝転がり4', '寝転がり5', '寝転がり6', '寝転がり7', '寝転がり8'],
-      // 「歩き1」画像削除への対応：テーブル面(walking)は「佇む」か「寝転がり」から選ばれるようにする
-      walking:  [
-        '佇む', '佇む2', '佇む3', '佇む4', '佇む5',
-        '寝転がり', '寝転がり2', '寝転がり3', '寝転がり4', '寝転がり5', '寝転がり6', '寝転がり7', '寝転がり8'
-      ],
-    };
+  private pickCatAsset(pose: string, angleMode: AngleMode): string {
+    let candidates: string[] = [];
 
-    // 該当ポーズがなければ全カテゴリから選ぶ
-    const candidates =
-      POSE_MAP[pose] ??
-      Object.values(POSE_MAP).flat();
+    // ── 真横(side)からの撮影モード: 立ち姿や座り姿が綺麗に映る
+    if (angleMode === 'side') {
+      if (pose === 'peeking') {
+        candidates = ['座り', '座り2', '座り3', '座り4', '座り5', '座り6', '座り7', '座り8'];
+      } else if (pose === 'standing') {
+        candidates = ['佇む', '佇む2', '佇む3', '佇む4', '佇む5'];
+      } else { // walking (surface etc.)
+        candidates = ['佇む', '佇む2', '佇む3', '佇む4', '佇む5', '座り', '座り2', '座り3', '座り4', '座り5', '座り6', '座り7', '座り8'];
+      }
+    } 
+    // ── 斜め45度俯瞰(diagonal)モード: テーブルを上から見下ろすため、平たい寝転がりなどが合う
+    else {
+      if (pose === 'peeking') {
+        candidates = ['座り', '座り2', '座り3', '座り4', '座り5', '座り6', '座り7', '座り8']; // 覗き込みは共通
+      } else if (pose === 'standing') {
+        // 立っている皿の上など斜めから見下ろす場合、立ち姿だと違和感があるので寝転がりを優先
+        candidates = ['寝転がり', '寝転がり2', '寝転がり3', '寝転がり4', '寝転がり5', '寝転がり6', '寝転がり7', '寝転がり8'];
+      } else {
+        candidates = ['寝転がり', '寝転がり2', '寝転がり3', '寝転がり4', '寝転がり5', '寝転がり6', '寝転がり7', '寝転がり8'];
+      }
+    }
 
     const name = candidates[Math.floor(Math.random() * candidates.length)];
     return `/${encodeURIComponent(name)}.png`;

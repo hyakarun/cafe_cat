@@ -75,8 +75,8 @@ const App: React.FC = () => {
   }, []);
 
   /* ── 位置調整 ── */
-  const handleAdjust = useCallback(async (newPlacement: PlacementResult) => {
-    const newImage = await pipelineInstance.recompose(newPlacement);
+  const handleAdjust = useCallback(async (newPlacement: PlacementResult, forceRerollAsset: boolean = false) => {
+    const newImage = await pipelineInstance.recompose(newPlacement, newPlacement.angleMode, forceRerollAsset);
     if (newImage) {
       setProcessedImage(newImage);
       setResult(prev => prev ? { ...prev, placement: newPlacement, imageDataUrl: newImage } : null);

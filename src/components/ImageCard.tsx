@@ -10,7 +10,7 @@ interface ImageCardProps {
   isProcessing: boolean;
   onReset: () => void;
   placement?: PlacementResult | null;
-  onAdjust?: (newPlacement: PlacementResult) => void;
+  onAdjust?: (newPlacement: PlacementResult, forceRerollAsset?: boolean) => void;
 }
 
 const ImageCard: React.FC<ImageCardProps> = ({
@@ -41,6 +41,13 @@ const ImageCard: React.FC<ImageCardProps> = ({
     adjustTimeoutRef.current = setTimeout(() => {
       if (onAdjust) onAdjust(next);
     }, 150);
+  };
+
+  const handleModeChange = (mode: 'side' | 'diagonal') => {
+    if (!localPlacement) return;
+    const next = { ...localPlacement, angleMode: mode };
+    setLocalPlacement(next);
+    if (onAdjust) onAdjust(next, true); // モード変更時は再抽選つきで即反映
   };
 
   return (
@@ -78,7 +85,20 @@ const ImageCard: React.FC<ImageCardProps> = ({
         <div className="card-content">
           {adjustMode && localPlacement ? (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="adjust-panel">
-              <h3 style={{ fontSize: '14px', marginBottom: '14px', color: 'var(--text-primary)' }}>位置とサイズの微調整</h3>
+              <h3 style={{ fontSize: '14px', marginBottom: '14px', color: 'var(--text-primary)' }}>位置・アングル微調整</h3>
+
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <button 
+                  className="btn-secondary" 
+                  style={{ flex: 1, padding: '8px', fontSize: '13px', border: localPlacement.angleMode === 'side' ? '2px solid var(--primary-color)' : '' }}
+                  onClick={() => handleModeChange('side')}
+                >📷 真横</button>
+                <button 
+                  className="btn-secondary" 
+                  style={{ flex: 1, padding: '8px', fontSize: '13px', border: localPlacement.angleMode === 'diagonal' ? '2px solid var(--primary-color)' : '' }}
+                  onClick={() => handleModeChange('diagonal')}
+                >📷 斜め/俯瞰</button>
+              </div>
               <div className="slider-row">
                 <label>左右 (X)</label>
                 <input type="range" min="0" max="1" step="0.01" value={localPlacement.x} onChange={e => handleSliderChange('x', parseFloat(e.target.value))} />
@@ -91,9 +111,15 @@ const ImageCard: React.FC<ImageCardProps> = ({
                 <label>大きさ</label>
                 <input type="range" min="0.05" max="0.5" step="0.01" value={localPlacement.scale} onChange={e => handleSliderChange('scale', parseFloat(e.target.value))} />
               </div>
-              <button className="btn-secondary" style={{ width: '100%', marginTop: '16px', justifyContent: 'center' }} onClick={() => setAdjustMode(false)}>
-                <Check size={16} /> 確定する
-              </button>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { if(onAdjust) onAdjust(localPlacement, true); }}>
+                  <Sparkles size={16} /> 別の猫にする
+                </button>
+                <button className="btn-primary-red" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setAdjustMode(false)}>
+                  <Check size={16} /> 完了
+                </button>
+              </div>
             </motion.div>
           ) : (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
