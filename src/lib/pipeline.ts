@@ -78,7 +78,6 @@ class ShirettoPipeline {
   // キャッシュ（再合成用）
   private lastImageSource: string | null = null;
   private lastDetectOutput: DetectResult[] | null = null;
-   height: number; channels: number; data: any } | null = null;
   private lastCatAsset: string | null = null;
 
   async init(): Promise<void> {
@@ -148,17 +147,24 @@ class ShirettoPipeline {
         segData = segOutput.map((out: any) => {
           const w = out.mask.width;
           const h = out.mask.height;
+          const channels = out.mask.channels || 1;
           const data = out.mask.data;
           let minX = w, maxX = 0, minY = h, maxY = 0;
-          for(let i=0; i<data.length; i++) {
-            if (data[i] > 128) { // 255 typically for presence
-              const x = i % w;
-              const y = Math.floor(i / w);
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
+          let hasPixels = false;
+          for(let i=0; i < w * h; i++) {
+            const val = data[i * channels]; // First channel (grayscale/R) is sufficient for binary masks
+            if (val > 128) {
+              const dx = i % w;
+              const dy = Math.floor(i / w);
+              if (dx < minX) minX = dx;
+              if (dx > maxX) maxX = dx;
+              if (dy < minY) minY = dy;
+              if (dy > maxY) maxY = dy;
+              hasPixels = true;
             }
+          }
+          if (!hasPixels) {
+            minX = 0; maxX = 0; minY = 0; maxY = 0;
           }
           return {
             label: out.label,
@@ -203,9 +209,10 @@ class ShirettoPipeline {
 
             // オブジェクトの最下部（maxY）が猫の足元より下（大きい）なら手前にある
             if (s.box.ymax > catFeetY - 0.05) { 
+              const channels = s.mask.channels || 1;
               const data = s.mask.data;
-              for (let i = 0; i < data.length; i++) {
-                if (data[i] > 128) merged[i] = 255;
+              for (let i = 0; i < mw * mh; i++) {
+                if (data[i * channels] > 128) merged[i] = 255;
               }
               hasOcclusion = true;
             }
@@ -353,11 +360,14 @@ class ShirettoPipeline {
       }
     }
 
-    x = Math.max(0.05, Math.min(0.90, x));
-    y = Math.max(0.05, Math.min(0.92, y));
+    const baseScale = Math.max(0.08, Math.min(0.25, objW * 0.65));
+    const scale = baseScale;
 
-    const baseScale = Math.max(0.08, Math.min(0.22, objW * 0.65));
-    const scale = baseScale; // Depth scale will be applied later when we sample depth directly
+    // 画像の端にめり込まないように、猫のサイズ（scale）を考慮して厳しくクランプ
+    const margin = Math.max(0.08, scale * 0.6);
+    x = Math.max(margin, Math.min(1.0 - margin, x || 0.5));
+    y = Math.max(margin, Math.min(1.0 - margin, y || 0.5));
+ // Depth scale will be applied later when we sample depth directly
 
     return {
       x, y, scale,
