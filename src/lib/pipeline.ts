@@ -96,17 +96,22 @@ class ShirettoPipeline {
 
   private async _loadModels(): Promise<void> {
     try {
-      const { pipeline, env } = await import('@xenova/transformers');
+      const { pipeline, env } = await import('@huggingface/transformers');
       env.allowLocalModels = false;
       env.useBrowserCache = true;
 
       console.log('[Pipeline] モデル読み込み開始...');
 
-      // 物体検出（Object Detection）— 軽量・高速・高精度
+      // Gemma 4 E2Bモデル（超高精度なマルチモーダルによる物体検出）
+      // ※WebGPUなどのサポート状況に応じて自動で最適なランタイムが選ばれます
       this.detector = await pipeline(
-        'object-detection',
-        'Xenova/detr-resnet-50',
-      );
+        'image-text-to-text',
+        'google/gemma-4-e2b',
+        { device: 'webgpu' } // デバイスのGPUを優先使用
+      ).catch(async e => {
+        console.warn('WebGPUの初期化に失敗しました。CPU・WASMモードでフォールバックします', e);
+        return await pipeline('image-text-to-text', 'google/gemma-4-e2b');
+      });
 
       // 深度推定（失敗してもセグメンテーションだけで動作継続）
       try {
@@ -150,17 +155,31 @@ class ShirettoPipeline {
 
     if (this.modelReady && this.detector) {
       try {
-        const detOutput = await this.detector(imageSource) as DetectResult[];
+        // Gemma 4に画像の物体検出と座標出力を依頼
+        const prompt = "Extract bounding boxes for all cafe items (e.g. dining table, cup, plate, cake, fork, spoon, knife, bottle). Return ONLY a JSON array formatted as [{ \"label\": \"item name\", \"box_2d\": [ymin, xmin, ymax, xmax] }] where coordinates are 0-1000.";
+        const gemmaResult = await this.detector(imageSource, prompt, { max_new_tokens: 512 });
+        const textOut: string = gemmaResult[0]?.generated_text || "[]";
         
-        // bounding boxの座標を0-1に正規化
-        const normalizedOutput = detOutput.map(d => ({
-          label: d.label,
-          score: d.score,
+        // 余分な文章を省いてJSONだけを抽出
+        const jsonMatch = textOut.match(/\[.*\]/s);
+        let parsedBoxes: any[] = [];
+        if (jsonMatch) {
+          try {
+            parsedBoxes = JSON.parse(jsonMatch[0]);
+          } catch (e) {
+            console.warn("Gemma JSON Parse Error:", e);
+          }
+        }
+        
+        // bounding boxの座標（0-1000）を0-1に正規化
+        const normalizedOutput = parsedBoxes.map(d => ({
+          label: d.label.toLowerCase(),
+          score: 0.99, // Gemmaは確信度を出さないため固定
           box: {
-            xmin: d.box.xmin / imgW,
-            xmax: d.box.xmax / imgW,
-            ymin: d.box.ymin / imgH,
-            ymax: d.box.ymax / imgH
+            xmin: d.box_2d[1] / 1000,
+            ymin: d.box_2d[0] / 1000,
+            xmax: d.box_2d[3] / 1000,
+            ymax: d.box_2d[2] / 1000
           }
         }));
         
