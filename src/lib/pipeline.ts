@@ -42,24 +42,18 @@ const CAFE_BEHAVIORS: Record<string, {
   position: 'behind' | 'beside' | 'surface';
   pose: PlacementResult['pose'];
 }> = {
-  // 高めの物体（後ろから覗き込む）
+  // ADE20K labels for common cafe items
   cup:       { position: 'behind',  pose: 'peeking' },
-  mug:       { position: 'behind',  pose: 'peeking' },
   glass:     { position: 'behind',  pose: 'peeking' },
   bottle:    { position: 'behind',  pose: 'peeking' },
-  bowl:      { position: 'behind',  pose: 'peeking' },
-  
-  // 平たい物体（横に立つ・座る）
+  vase:      { position: 'behind',  pose: 'peeking' },
+  food:      { position: 'beside',  pose: 'standing' },
   plate:     { position: 'beside',  pose: 'standing' },
-  spoon:     { position: 'beside',  pose: 'standing' },
-  fork:      { position: 'beside',  pose: 'standing' },
-  knife:     { position: 'beside',  pose: 'standing' },
-  
-  // テーブル面など（表面を歩く・寝転がる）
-  "dining table": { position: 'surface', pose: 'walking' },
-  bed:       { position: 'surface', pose: 'walking' },
-  couch:     { position: 'surface', pose: 'walking' },
-  chair:     { position: 'surface', pose: 'walking' },
+  bowl:      { position: 'beside',  pose: 'standing' },
+  table:     { position: 'surface', pose: 'walking' },
+  desk:      { position: 'surface', pose: 'walking' },
+  "coffee table": { position: 'surface', pose: 'walking' },
+  floor:     { position: 'surface', pose: 'walking' },
 };
 
 function getBehavior(label: string) {
@@ -77,14 +71,14 @@ function isTargetLabel(label: string): boolean {
 
 class ShirettoPipeline {
   private detector: any = null;
-  private depthEstimator: any = null;
+  
   private initPromise: Promise<void> | null = null;
   private modelReady = false;
 
   // キャッシュ（再合成用）
   private lastImageSource: string | null = null;
   private lastDetectOutput: DetectResult[] | null = null;
-  private lastDepthOutput: { width: number; height: number; channels: number; data: any } | null = null;
+   height: number; channels: number; data: any } | null = null;
   private lastCatAsset: string | null = null;
 
   async init(): Promise<void> {
@@ -104,25 +98,18 @@ class ShirettoPipeline {
 
       // Gemma 4 E2Bモデル（超高精度なマルチモーダルによる物体検出）
       // ※WebGPUなどのサポート状況に応じて自動で最適なランタイムが選ばれます
+      // Pixel-perfect Semantic Segmentation
       this.detector = await pipeline(
-        'image-text-to-text',
-        'google/gemma-4-e2b',
-        { device: 'webgpu' } // デバイスのGPUを優先使用
+        'image-segmentation',
+        'Xenova/segformer-b0-finetuned-ade-512-512',
+        { device: 'webgpu' }
       ).catch(async e => {
-        console.warn('WebGPUの初期化に失敗しました。CPU・WASMモードでフォールバックします', e);
-        return await pipeline('image-text-to-text', 'google/gemma-4-e2b');
+        console.warn('WebGPU fallback to WASM...', e);
+        return await pipeline('image-segmentation', 'Xenova/segformer-b0-finetuned-ade-512-512');
       });
 
       // 深度推定（失敗してもセグメンテーションだけで動作継続）
-      try {
-        this.depthEstimator = await pipeline(
-          'depth-estimation',
-          'Xenova/depth-anything-small-hf',
-        );
-        console.log('[Pipeline] 深度推定モデルも読み込み完了 ✓');
-      } catch (depthErr) {
-        console.warn('[Pipeline] 深度推定モデルは省略:', depthErr);
-      }
+      
 
       this.modelReady = true;
       console.log('[Pipeline] モデル読み込み完了 ✓');
@@ -140,12 +127,11 @@ class ShirettoPipeline {
     let placement: PlacementResult;
     let detectedLabels: string[] = [];
     let occlusionMask: { width: number; height: number; data: Uint8Array } | null = null;
+    let segData: { label: string, mask: any, box: any }[] = [];
 
     this.lastImageSource = imageSource;
-    this.lastDetectOutput = null; // リセット
-    this.lastDepthOutput = null;
+    this.lastDetectOutput = null;
 
-    // 元画像のサイズを取得（正規化座標に変換するため）
     const imgInfo = await new Promise<HTMLImageElement>((resolve, reject) => {
       const i = new Image(); i.crossOrigin = 'anonymous'; 
       i.onload = () => resolve(i); i.onerror = reject; i.src = imageSource;
@@ -155,78 +141,82 @@ class ShirettoPipeline {
 
     if (this.modelReady && this.detector) {
       try {
-        // Gemma 4に画像の物体検出と座標出力を依頼
-        const prompt = "Extract bounding boxes for all cafe items (e.g. dining table, cup, plate, cake, fork, spoon, knife, bottle). Return ONLY a JSON array formatted as [{ \"label\": \"item name\", \"box_2d\": [ymin, xmin, ymax, xmax] }] where coordinates are 0-1000.";
-        const gemmaResult = await this.detector(imageSource, prompt, { max_new_tokens: 512 });
-        const textOut: string = gemmaResult[0]?.generated_text || "[]";
+        const segOutput = await this.detector(imageSource);
         
-        // 余分な文章を省いてJSONだけを抽出
-        const jsonMatch = textOut.match(/\[.*\]/s);
-        let parsedBoxes: any[] = [];
-        if (jsonMatch) {
-          try {
-            parsedBoxes = JSON.parse(jsonMatch[0]);
-          } catch (e) {
-            console.warn("Gemma JSON Parse Error:", e);
-          }
-        }
-        
-        // bounding boxの座標（0-1000）を0-1に正規化
-        const normalizedOutput = parsedBoxes.map(d => ({
-          label: d.label.toLowerCase(),
-          score: 0.99, // Gemmaは確信度を出さないため固定
-          box: {
-            xmin: d.box_2d[1] / 1000,
-            ymin: d.box_2d[0] / 1000,
-            xmax: d.box_2d[3] / 1000,
-            ymax: d.box_2d[2] / 1000
-          }
-        }));
-        
-        this.lastDetectOutput = normalizedOutput;
-        detectedLabels = normalizedOutput
-          .map(s => s.label.toLowerCase())
-          .sort((a,b) => a.localeCompare(b)); // Sort just for uniqueness if needed, keeping simple
-
-        const hasValidTarget = normalizedOutput.some(s => isTargetLabel(s.label));
-        if (!hasValidTarget) {
-          throw new Error('NOT_ENOUGH_SPACE');
-        }
-
-        // ── 深度推定で奥行きマップ全体を取得 ──
-        let depthAtPlacement = 0.5;
-        if (this.depthEstimator) {
-          try {
-            const depthResult = await this.depthEstimator(imageSource);
-            const depthTensor = (depthResult as any)?.depth;
-            if (depthTensor?.data) {
-              const dw = depthTensor.width || 518;
-              const dh = depthTensor.height || 518;
-              const channels = depthTensor.channels || 1;
-              this.lastDepthOutput = { width: dw, height: dh, channels, data: depthTensor.data };
+        // SegFormer outputs: [{ label: string, mask: RawImage }, ...]
+        // Parse bounding boxes from the masks to maintain our internal structure.
+        segData = segOutput.map((out: any) => {
+          const w = out.mask.width;
+          const h = out.mask.height;
+          const data = out.mask.data;
+          let minX = w, maxX = 0, minY = h, maxY = 0;
+          for(let i=0; i<data.length; i++) {
+            if (data[i] > 128) { // 255 typically for presence
+              const x = i % w;
+              const y = Math.floor(i / w);
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
             }
-          } catch (e) {
-            console.warn('[Pipeline] 深度推定スキップ:', e);
           }
-        }
+          return {
+            label: out.label,
+            mask: out.mask,
+            box: {
+              xmin: minX / w,
+              xmax: maxX / w,
+              ymin: minY / h,
+              ymax: maxY / h
+            }
+          };
+        });
 
-        placement = this.calculatePlacement(normalizedOutput);
+        // 互換性のための DetectResult への変換
+        this.lastDetectOutput = segData.map(s => ({
+          label: s.label,
+          score: 1.0,
+          box: s.box
+        }));
 
-        if (this.lastDepthOutput) {
-          depthAtPlacement = this.sampleDepthAtBounds(
-            this.lastDepthOutput,
-            placement
-          );
-          placement.depthValue = depthAtPlacement;
-          
-          // ── 遮蔽マスク：深度マップを使って猫の後ろにある物体を隠すマスクの生成 ──
-          occlusionMask = this.buildDepthOcclusionMask(this.lastDepthOutput, placement);
+        detectedLabels = segData.map(s => s.label).sort((a,b) => a.localeCompare(b));
+
+        const hasValidTarget = segData.some(s => isTargetLabel(s.label));
+        if (!hasValidTarget) throw new Error('NOT_ENOUGH_SPACE');
+
+        placement = this.calculatePlacement(this.lastDetectOutput);
+
+        // --- Occlusion Mask 生成 (Depth推定を使わず、SegFormerのピクセルマスクを利用) ---
+        // 猫の足元のY座標 (Y=1に近いほど手前)
+        const catFeetY = placement.y + (placement.scale * 0.4);
+        
+        // 猫より「手前」にある障害物（テーブル等以外）のマスクを統合する
+        if (segData.length > 0) {
+          const mw = segData[0].mask.width;
+          const mh = segData[0].mask.height;
+          const merged = new Uint8Array(mw * mh);
+          let hasOcclusion = false;
+
+          for (const s of segData) {
+            const bh = getBehavior(s.label);
+            if (bh.position === 'surface') continue; // テーブルなどは遮蔽物にならない
+
+            // オブジェクトの最下部（maxY）が猫の足元より下（大きい）なら手前にある
+            if (s.box.ymax > catFeetY - 0.05) { 
+              const data = s.mask.data;
+              for (let i = 0; i < data.length; i++) {
+                if (data[i] > 128) merged[i] = 255;
+              }
+              hasOcclusion = true;
+            }
+          }
+          if (hasOcclusion) {
+            occlusionMask = { width: mw, height: mh, data: merged };
+          }
         }
 
       } catch (err: any) {
-        if (err.message === 'NOT_ENOUGH_SPACE') {
-          throw err;
-        }
+        if (err.message === 'NOT_ENOUGH_SPACE') throw err;
         console.warn('[Pipeline] 推論失敗—フォールバック配置:', err);
         placement = this.fallbackPlacement();
       }
@@ -245,19 +235,9 @@ class ShirettoPipeline {
     
     return { imageDataUrl, debugImageDataUrl, placement, detectedLabels, modelLoaded: this.modelReady };
   }
-
   async recompose(newPlacement: PlacementResult): Promise<string | null> {
     if (!this.lastImageSource || !this.lastCatAsset) return null;
-    
-    let occlusionMask = null;
-    if (this.lastDepthOutput) {
-      newPlacement.depthValue = this.sampleDepthAtBounds(
-        this.lastDepthOutput,
-        newPlacement
-      );
-      occlusionMask = this.buildDepthOcclusionMask(this.lastDepthOutput, newPlacement);
-    }
-    return this.composeOverlay(this.lastImageSource, newPlacement, occlusionMask, this.lastCatAsset);
+    return this.composeOverlay(this.lastImageSource, newPlacement, null, this.lastCatAsset);
   }
 
   private drawDebugMasks(source: string, segments: DetectResult[], imgW: number, imgH: number): Promise<string> {
@@ -389,44 +369,9 @@ class ShirettoPipeline {
     };
   }
 
-  private sampleDepthAtBounds(
-    depthResult: { width: number; height: number; channels: number; data: any },
-    placement: PlacementResult
-  ): number {
-    const { width: w, height: h, channels, data } = depthResult;
-    const cx = Math.max(0, Math.min(w - 1, Math.floor(placement.x * w)));
-    const cy = Math.max(0, Math.min(h - 1, Math.floor(placement.y * h)));
-    const idx = (cy * w + cx) * channels;
-    const raw = data[Math.max(0, Math.min(idx, data.length - 1))] ?? 128;
-    return Math.max(0, Math.min(1, raw / 255.0));
-  }
+  
 
-  private buildDepthOcclusionMask(
-    depthResult: { width: number; height: number; channels: number; data: any },
-    placement: PlacementResult,
-  ): { width: number; height: number; data: Uint8Array } | null {
-    const { width, height, channels, data } = depthResult;
-    const merged = new Uint8Array(width * height);
-
-    const px = Math.max(0, Math.min(width - 1, Math.floor(placement.x * width)));
-    const py = Math.max(0, Math.min(height - 1, Math.floor(placement.y * height)));
-    const baseIdx = (py * width + px) * channels;
-    const baseDepthValue = data[baseIdx];
-
-    const DEPTH_THRESHOLD = 5;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const i = y * width + x;
-        const dIdx = i * channels;
-        if (data[dIdx] > baseDepthValue + DEPTH_THRESHOLD) {
-          merged[i] = 255;
-        }
-      }
-    }
-
-    return { width, height, data: merged };
-  }
+  
 
   private fallbackPlacement(): PlacementResult {
     return {
